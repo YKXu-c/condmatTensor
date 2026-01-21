@@ -25,9 +25,9 @@ import torch
 import matplotlib.pyplot as plt
 
 from condmatTensor.core import BaseTensor
-from condmatTensor.lattice import BravaisLattice, TightBindingModel, generate_k_path
+from condmatTensor.lattice import BravaisLattice, TightBindingModel, generate_k_path, generate_kmesh
 from condmatTensor.solvers import diagonalize
-from condmatTensor.analysis import BandStructure
+from condmatTensor.analysis import BandStructure, DOSCalculator
 
 
 def build_kagome_lattice(t: float = -1.0) -> BravaisLattice:
@@ -381,6 +381,48 @@ def main():
     plt.tight_layout()
     plt.savefig("kagome_bandstructure_comparison.png", dpi=150)
     print(f"   Saved: kagome_bandstructure_comparison.png")
+
+    # ============================================================
+    # DOS CALCULATION: Using k-mesh
+    # ============================================================
+    print("\n" + "=" * 70)
+    print("DOS Calculation: Using uniform k-mesh")
+    print("=" * 70)
+
+    print("\n6a. Generating uniform k-mesh for DOS...")
+    k_mesh = generate_kmesh(lattice, nk=50)
+    print(f"   Number of k-points: {len(k_mesh)}")
+
+    print("\n7a. Building H(k) on k-mesh...")
+    Hk_mesh = tb_model.build_Hk(k_mesh)
+    print(f"   H(k) mesh: {Hk_mesh.tensor.shape}")
+
+    print("\n8a. Diagonalizing on k-mesh...")
+    eigenvalues_mesh, _ = diagonalize(Hk_mesh.tensor, hermitian=True)
+    print(f"   Eigenvalues: {eigenvalues_mesh.shape}")
+
+    print("\n9a. Computing DOS with Lorentzian broadening...")
+    omega = torch.linspace(-4, 4, 500, dtype=torch.float64)
+    dos = DOSCalculator()
+    omega_vals, rho_vals = dos.from_eigenvalues(eigenvalues_mesh, omega, eta=0.05)
+    print(f"   DOS grid: {omega_vals.shape}")
+    print(f"   DOS range: [{rho_vals.min():.4f}, {rho_vals.max():.4f}]")
+
+    print("\n10a. Creating DOS plot...")
+    fig, ax = plt.subplots(figsize=(7, 5))
+    dos.plot(ax=ax, title="Kagome Lattice DOS (50x50 k-mesh)")
+
+    # Add flat band annotation
+    ax.axvline(x=-2, color='red', linestyle='--', alpha=0.7, label='Flat band (E = -2)')
+    ax.legend(fontsize=10)
+
+    plt.tight_layout()
+    plt.savefig("kagome_dos.png", dpi=150)
+    print(f"   Saved: kagome_dos.png")
+
+    print("\n" + "=" * 70)
+    print("Done! All plots saved.")
+    print("=" * 70)
 
     plt.show()
 
