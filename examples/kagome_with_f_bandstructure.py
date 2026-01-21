@@ -510,6 +510,41 @@ def main():
     plt.savefig("kagome_f_dos.png", dpi=150)
     print(f"   Saved: kagome_f_dos.png")
 
+    # ============================================================
+    # NEW TEST: Band Structure + DOS Combined Plot
+    # ============================================================
+    print("\n" + "=" * 70)
+    print("NEW TEST: Band Structure + DOS Combined Plot")
+    print("=" * 70)
+
+    print("\n11. Creating combined plot (bands + DOS with shared energy axis)...")
+    bs_combined = BandStructure()
+    bs_combined.compute(eigenvalues_tb, k_path, ticks)
+
+    # Use same k-mesh eigenvalues for DOS
+    # Note: plot_with_dos creates figure internally and returns (ax_bands, ax_dos)
+    ax_bands, ax_dos = bs_combined.plot_with_dos(
+        eigenvalues_mesh=eigenvalues_mesh,
+        omega=omega,
+        eta=0.05,
+        title=f"Kagome-F Lattice: Band Structure + DOS (t={t}, t_f={t_f})"
+    )
+
+    # Add parameter annotation
+    ax_bands.text(0.05, 0.95, f"t={t}\nt_f={t_f}\nε_f={epsilon_f}",
+                  transform=ax_bands.transAxes, fontsize=9,
+                  verticalalignment='top',
+                  bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+    ax_dos.text(0.95, 0.95, f"4 bands\nf-orbital\nhybridized",
+                transform=ax_dos.transAxes, fontsize=9,
+                verticalalignment='top', horizontalalignment='right',
+                bbox=dict(boxstyle='round', facecolor='lightcoral', alpha=0.5))
+
+    # Get the figure from the axes and save
+    fig = ax_bands.figure
+    fig.savefig("kagome_with_f_bandstructure_with_dos.png", dpi=150)
+    print(f"   Saved: kagome_with_f_bandstructure_with_dos.png")
+
     print("\n" + "=" * 70)
     print("Done! All plots saved.")
     print("=" * 70)
