@@ -72,6 +72,39 @@ class DOSCalculator:
 
         return omega, rho
 
+    def from_spectral_function(
+        self,
+        A: torch.Tensor,
+        omega: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Compute DOS from spectral function A(ω).
+
+        For non-interacting systems, the spectral function equals the DOS.
+        For multi-orbital systems, sums over all orbitals:
+            DOS(ω) = Σᵢ Aᵢ(ω)
+
+        Args:
+            A: Spectral function with shape (n_omega, n_orb)
+            omega: Energy grid for DOS (must match A.shape[0])
+
+        Returns:
+            (omega, rho) tuple - also stored in self.omega, self.rho
+        """
+        if A.shape[0] != len(omega):
+            raise ValueError(
+                f"Spectral function shape {A.shape} doesn't match omega length {len(omega)}"
+            )
+
+        # DOS = sum over all orbitals
+        rho = torch.sum(A, dim=1)
+
+        self.omega = omega
+        self.rho = rho
+        self.eta = None  # No broadening parameter when using A(ω)
+
+        return omega, rho
+
     def plot(
         self,
         ax: Optional["maxes.Axes"] = None,
