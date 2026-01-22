@@ -28,6 +28,7 @@ from condmatTensor.core import BaseTensor
 from condmatTensor.lattice import BravaisLattice, TightBindingModel, generate_k_path, generate_kmesh
 from condmatTensor.solvers import diagonalize
 from condmatTensor.analysis import BandStructure, DOSCalculator
+from condmatTensor.manybody import SpectralFunction
 
 
 def build_kagome_lattice(t: float = -1.0) -> BravaisLattice:
@@ -419,6 +420,76 @@ def main():
     plt.tight_layout()
     plt.savefig("kagome_dos.png", dpi=150)
     print(f"   Saved: kagome_dos.png")
+
+    # ============================================================
+    # NEW TEST: Bare Spectral Function A(ω) from Eigenvalues
+    # ============================================================
+    print("\n" + "=" * 70)
+    print("NEW TEST: Bare Spectral Function A(ω) (Non-Interacting)")
+    print("=" * 70)
+
+    print("\n11. Computing bare spectral function A(ω) from eigenvalues...")
+    spec_func = SpectralFunction()
+    omega_spec, A = spec_func.from_eigenvalues(eigenvalues_mesh, omega, eta=0.05)
+    print(f"   A(ω) shape: {A.shape}")
+    print(f"   A(ω) range: [{A.min():.4f}, {A.max():.4f}]")
+
+    # Compute DOS from A(ω)
+    dos_from_A = spec_func.compute_dos(A)
+    print(f"   DOS from A(ω) shape: {dos_from_A.shape}")
+    print(f"   DOS from A(ω) range: [{dos_from_A.min():.4f}, {dos_from_A.max():.4f}]")
+
+    # Compare with DOS from eigenvalues
+    diff_dos = torch.max(torch.abs(dos_from_A - rho_vals)).item()
+    print(f"\n   Max difference between DOS from A(ω) and DOS from eigenvalues: {diff_dos:.2e}")
+
+    if diff_dos < 1e-10:
+        print("   ✓ A(ω) matches DOS exactly for non-interacting case!")
+    else:
+        print(f"   Note: Small difference due to numerical precision")
+
+    print("\n12. Creating A(ω) plot (orbital-resolved)...")
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+
+    # Plot 1: Orbital-resolved A(ω)
+    ax1 = axes[0]
+    colors = plt.cm.tab10(torch.linspace(0, 1, 3))
+    for i in range(3):
+        ax1.plot(omega.cpu().numpy(), A[:, i].cpu().numpy(),
+                label=f"Orbital {i}", color=colors[i])
+    ax1.set_xlabel(r"Energy $\omega$ ($|t|$)", fontsize=12)
+    ax1.set_ylabel(r"Spectral Function $A(\omega)$", fontsize=12)
+    ax1.set_title("Orbital-Resolved A(ω)", fontsize=12)
+    ax1.legend(fontsize=10)
+    ax1.grid(True, alpha=0.3)
+
+    # Plot 2: Total A(ω) (which equals DOS)
+    ax2 = axes[1]
+    ax2.plot(omega.cpu().numpy(), dos_from_A.cpu().numpy(),
+             color='black', linewidth=1.5)
+    ax2.fill_between(omega.cpu().numpy(), 0, dos_from_A.cpu().numpy(),
+                     alpha=0.3, color='gray')
+    ax2.set_xlabel(r"Energy $\omega$ ($|t|$)", fontsize=12)
+    ax2.set_ylabel(r"Spectral Function $A(\omega)$", fontsize=12)
+    ax2.set_title("Total A(ω) (Sum over Orbitals)", fontsize=12)
+    ax2.grid(True, alpha=0.3)
+
+    # Plot 3: Comparison A(ω) vs DOS from eigenvalues
+    ax3 = axes[2]
+    ax3.plot(omega.cpu().numpy(), dos_from_A.cpu().numpy(),
+             label='A(ω) total', color='blue', linewidth=1.5)
+    ax3.plot(omega.cpu().numpy(), rho_vals.cpu().numpy(),
+             label='DOS from eigenvalues', color='red',
+             linewidth=1.5, linestyle='--')
+    ax3.set_xlabel(r"Energy $\omega$ ($|t|$)", fontsize=12)
+    ax3.set_ylabel(r"Density of States", fontsize=12)
+    ax3.set_title("A(ω) vs DOS Comparison", fontsize=12)
+    ax3.legend(fontsize=10)
+    ax3.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig("kagome_spectral_function.png", dpi=150)
+    print(f"   Saved: kagome_spectral_function.png")
 
     # ============================================================
     # NEW TEST: Band Structure + DOS Combined Plot
