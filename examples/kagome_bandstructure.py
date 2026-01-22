@@ -65,7 +65,7 @@ def build_kagome_lattice(t: float = -1.0) -> BravaisLattice:
     return BravaisLattice(
         cell_vectors=cell_vectors,
         basis_positions=basis_positions,
-        num_orbitals=1,
+        num_orbitals=[1, 1, 1],  # 3 sites, each with 1 orbital
     )
 
 

@@ -202,7 +202,7 @@ class BravaisLattice:
         self,
         cell_vectors: torch.Tensor,
         basis_positions: List[torch.Tensor],
-        num_orbitals: int = 1,
+        num_orbitals: List[int],
     ) -> None:
         """
         Initialize BravaisLattice.
@@ -210,11 +210,21 @@ class BravaisLattice:
         Args:
             cell_vectors: Lattice vectors, shape (dim, dim)
             basis_positions: List of basis atom positions in fractional coords
-            num_orbitals: Number of orbitals per site
+            num_orbitals: Number of orbitals per site (list, one per site)
+                         Example: [1, 1, 1, 7] for 3 sites with 1 orbital + 1 site with 7 orbitals
+
+        Raises:
+            ValueError: If len(num_orbitals) != len(basis_positions)
         """
+        if len(num_orbitals) != len(basis_positions):
+            raise ValueError(
+                f"Length of num_orbitals ({len(num_orbitals)}) must match "
+                f"number of basis positions ({len(basis_positions)})"
+            )
+
         self.cell_vectors = cell_vectors
         self.basis_positions = basis_positions
-        self.num_orbitals = num_orbitals
+        self.num_orbitals = num_orbitals  # Now List[int]
         self.dim = cell_vectors.shape[0]
 
         self.num_sites = len(basis_positions)
@@ -227,7 +237,44 @@ class BravaisLattice:
     @property
     def total_orbitals(self) -> int:
         """Total number of orbitals in unit cell."""
-        return self.num_sites * self.num_orbitals
+        return sum(self.num_orbitals)
+
+    def orbital_offsets(self) -> List[int]:
+        """Return cumulative orbital offsets for each site.
+
+        Example: num_orbitals=[2, 3, 1] -> returns [0, 2, 5, 6]
+        Useful for slicing orbital indices by site.
+
+        Returns:
+            List of orbital offsets where site i spans [offsets[i], offsets[i+1])
+        """
+        offsets = [0]
+        for n in self.num_orbitals:
+            offsets.append(offsets[-1] + n)
+        return offsets
+
+    def site_orbital_slice(self, site_idx: int) -> slice:
+        """Return slice for orbitals belonging to a specific site.
+
+        Args:
+            site_idx: Site index
+
+        Returns:
+            Slice object for indexing orbitals of this site
+        """
+        offsets = self.orbital_offsets()
+        return slice(offsets[site_idx], offsets[site_idx + 1])
+
+    def num_orbitals_per_site(self, site_idx: int) -> int:
+        """Return number of orbitals for a specific site.
+
+        Args:
+            site_idx: Site index
+
+        Returns:
+            Number of orbitals at this site
+        """
+        return self.num_orbitals[site_idx]
 
     def reciprocal_vectors(self) -> torch.Tensor:
         """
@@ -286,5 +333,5 @@ class BravaisLattice:
     def __repr__(self) -> str:
         return (
             f"BravaisLattice(dim={self.dim}, num_sites={self.num_sites}, "
-            f"num_orbitals={self.num_orbitals})"
+            f"num_orbitals={self.num_orbitals}, total={self.total_orbitals})"
         )

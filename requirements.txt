@@ -3,3 +3,8 @@ numpy>=1.24
 matplotlib>=3.7
 scipy>=1.10
 pyyaml>=6.0
+
+# Optional dependencies for LEVEL 7 (optimization)
+# Install these when using BayesianOptimizer:
+# pip install botorch>=0.9.0  # For Bayesian optimization (preferred)
+# pip install scikit-optimize>=0.9  # Fallback Bayesian optimization

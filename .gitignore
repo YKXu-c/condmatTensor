@@ -1,0 +1,5 @@
+# ignore
+CLAUDE.md
+plans/
+env_condmatTensor/
+.claude/settings.json

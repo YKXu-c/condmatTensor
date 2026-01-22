@@ -79,7 +79,7 @@ def build_kagome_f_lattice(t: float = -1.0, t_f: float = -0.5, epsilon_f: float 
     return BravaisLattice(
         cell_vectors=cell_vectors,
         basis_positions=basis_positions,
-        num_orbitals=1,
+        num_orbitals=[1, 1, 1, 1],  # 4 sites, each with 1 orbital
     )
 
 
@@ -443,7 +443,7 @@ def main():
     kagome_lattice = BravaisLattice(
         cell_vectors=torch.stack([a1, a2]),
         basis_positions=kagome_basis,
-        num_orbitals=1,
+        num_orbitals=[1, 1, 1],  # 3 sites, each with 1 orbital
     )
 
     Hk_kagome = build_kagome_hamiltonian_k_space(kagome_lattice, k_path, t=t)
