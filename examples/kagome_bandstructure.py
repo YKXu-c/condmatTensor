@@ -205,6 +205,15 @@ def main():
     print("Kagome Lattice Band Structure: Method Comparison")
     print("=" * 70)
 
+    # Device selection: Use GPU for complex operations (optional)
+    # Comment out the following line to force CPU usage
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"\nUsing device: {device}")
+    if device.type == "cuda":
+        print(f"  GPU: {torch.cuda.get_device_name(0)}")
+        print("  Note: This example is simple, but for larger lattices or")
+        print("        many k-points, GPU can provide significant speedup.")
+
     # Parameters
     t = -1.0  # Hopping parameter (effective hopping = -t)
     # Note: The analytic formula H = -t * M means:

@@ -89,6 +89,15 @@ class EffectiveArrayOptimizer:
         self.S_eff: Optional[torch.Tensor] = None
         self.loss_history: List[float] = []
 
+    def reset(self):
+        """Reset the optimizer state.
+
+        Clears all optimization results to allow running a fresh optimization.
+        """
+        self.J_eff = None
+        self.S_eff = None
+        self.loss_history = []
+
     def _detect_f_orbitals(self) -> List[int]:
         """Detect f-orbital indices from orbital names.
 
@@ -121,6 +130,7 @@ class EffectiveArrayOptimizer:
         S_bounds: Optional[Tuple[float, float]] = None,
         n_init: int = 20,
         n_iter: int = 100,
+        backend: str = "auto",
         verbose: bool = True,
         device: Optional[torch.device] = None,
     ) -> Tuple[float, torch.Tensor]:
@@ -134,6 +144,7 @@ class EffectiveArrayOptimizer:
             S_bounds: Bounds for S components (min, max). If None, uses [-1, 1]
             n_init: Number of initial samples for Bayesian optimization
             n_iter: Number of optimization iterations
+            backend: Bayesian optimization backend ('auto', 'sober', 'botorch', 'simple')
             verbose: Print progress information
             device: Device for computation
 
@@ -202,12 +213,13 @@ class EffectiveArrayOptimizer:
             bounds=bounds,
             n_init=n_init,
             n_iter=n_iter,
-            backend="auto",
+            backend=backend,
         )
 
         if verbose:
             print("Optimizing effective magnetic coupling...")
             print(f"  Method: {self.method}")
+            print(f"  Backend: {backend.upper()}")
             print(f"  J bounds: {J_bounds}")
             print(f"  S bounds: {S_bounds}")
 

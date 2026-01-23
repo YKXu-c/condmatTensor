@@ -181,6 +181,42 @@ class TightBindingModel:
             displacements=None,  # k-space has no displacements
         )
 
+    def to(self, device: torch.device) -> "TightBindingModel":
+        """Move model to device (CPU/GPU).
+
+        Creates a new TightBindingModel with lattice moved to the specified device.
+        The hopping terms are moved to the device when build_Hk or build_HR is called.
+
+        Args:
+            device: Target device (e.g., torch.device('cuda') or torch.device('cpu'))
+
+        Returns:
+            New TightBindingModel instance on the specified device
+
+        Examples:
+            >>> model = TightBindingModel(lattice, orbital_labels=['A', 'B', 'C'])
+            >>> model_gpu = model.to(torch.device('cuda'))
+        """
+        # Create new instance with lattice moved to device
+        new_lattice = type(self.lattice)(
+            cell_vectors=self.lattice.cell_vectors.to(device),
+            basis_positions=[bp.to(device) for bp in self.lattice.basis_positions],
+            num_orbitals=self.lattice.num_orbitals.copy(),
+        )
+
+        # Copy hoppings (they will be moved to device when building Hamiltonians)
+        new_hoppings = []
+        for orb_i, orb_j, disp, value in self.hoppings:
+            new_hoppings.append((orb_i, orb_j, disp.clone().to(device), value))
+
+        new_model = type(self)(
+            lattice=new_lattice,
+            orbital_labels=self.orbital_labels.copy(),
+            hoppings=new_hoppings,
+        )
+
+        return new_model
+
 
 class BravaisLattice:
     """

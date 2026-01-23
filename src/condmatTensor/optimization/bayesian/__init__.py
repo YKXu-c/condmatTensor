@@ -1,7 +1,12 @@
 """Bayesian optimization for parameter tuning in condensed matter systems.
 
-Provides a unified interface for Bayesian optimization using either SOBER or
-botorch as the backend. SOBER is preferred for its simplicity and performance.
+Provides a unified interface for Bayesian optimization using either SOBER,
+BoTorch, or a simple fallback as the backend.
+
+Backend priority (auto detection):
+1. SOBER (preferred) - https://github.com/ma921/SOBER
+2. BoTorch/GPyTorch - https://botorch.org/
+3. Simple (Thompson sampling fallback)
 
 References:
     - SOBER: https://github.com/ma921/SOBER
@@ -9,7 +14,7 @@ References:
 
 Dependencies:
     - torch>=2.0
-    - Either SOBER or botorch (both optional)
+    - Either SOBER, botorch, or scikit-learn (all optional)
 
 LEVEL 7 of the 10-level architecture.
 """
@@ -17,6 +22,11 @@ LEVEL 7 of the 10-level architecture.
 from typing import Callable, Optional, Tuple, Union, List
 import torch
 import numpy as np
+
+from condmatTensor.optimization.bayesian.sober_backend import SoberBackend, run_sober_optimization
+from condmatTensor.optimization.bayesian.botorch_backend import BotorchBackend, run_botorch_optimization
+from condmatTensor.optimization.bayesian.simple_backend import SimpleBackend, run_simple_optimization
+from condmatTensor.optimization.bayesian.utils import latin_hypercube_sampling
 
 
 class BayesianOptimizer:
@@ -27,14 +37,14 @@ class BayesianOptimizer:
     to model the objective function and an acquisition function to decide where
     to sample next.
 
-    This class provides a unified interface that works with either SOBER or
-    botorch as the backend.
+    This class provides a unified interface that works with either SOBER,
+    botorch, or a simple fallback as the backend.
 
     Attributes:
         bounds: Parameter bounds [(min_1, max_1), ..., (min_d, max_d)]
         n_init: Number of initial random samples
         n_iter: Number of optimization iterations
-        backend: Optimization backend ('sober', 'botorch', or 'auto')
+        backend: Optimization backend ('sober', 'botorch', 'simple', or 'auto')
         X_observed: Observed parameter points
         y_observed: Observed objective values
     """
@@ -53,8 +63,8 @@ class BayesianOptimizer:
             bounds: List of (min, max) tuples for each parameter dimension
             n_init: Number of initial random samples
             n_iter: Number of Bayesian optimization iterations
-            backend: Optimization backend ('sober', 'botorch', or 'auto')
-                    'auto' will try SOBER first, then botorch
+            backend: Optimization backend ('sober', 'botorch', 'simple', or 'auto')
+                    'auto' will try SOBER first, then botorch, then simple
             seed: Random seed for reproducibility
         """
         self.bounds = bounds
@@ -69,6 +79,7 @@ class BayesianOptimizer:
 
         # Backend-specific optimizer
         self._optimizer = None
+        self._maximize: bool = False
 
     def _detect_backend(self, backend: str) -> str:
         """Detect available optimization backend.
@@ -81,7 +92,7 @@ class BayesianOptimizer:
         """
         if backend == "auto":
             try:
-                import sober
+                from sober import SoberWrapper
                 return "sober"
             except ImportError:
                 try:
@@ -92,22 +103,25 @@ class BayesianOptimizer:
 
         if backend == "sober":
             try:
-                import sober
+                from sober import SoberWrapper
             except ImportError:
                 raise ImportError(
                     "SOBER backend requested but not installed. "
-                    "Install with: pip install sober"
+                    "Install from: https://github.com/ma921/SOBER/releases"
                 )
         elif backend == "botorch":
             try:
                 import botorch
             except ImportError:
                 raise ImportError(
-                    "botorch backend requested but not installed. "
-                    "Install with: pip install botorch"
+                    "BoTorch backend requested but not installed. "
+                    "Install with: pip install botorch gpytorch"
                 )
         elif backend != "simple":
-            raise ValueError(f"Unknown backend: {backend}. Use 'sober', 'botorch', 'simple', or 'auto'.")
+            raise ValueError(
+                f"Unknown backend: {backend}. "
+                "Use 'sober', 'botorch', 'simple', or 'auto'."
+            )
 
         return backend
 
@@ -125,24 +139,18 @@ class BayesianOptimizer:
         Returns:
             Random samples with shape (n_samples, n_dim)
         """
-        n_dim = len(self.bounds)
-        generator = torch.Generator(device=device)
-        if self.seed is not None:
-            generator.manual_seed(self.seed)
+        return latin_hypercube_sampling(self.bounds, n_samples, device, self.seed)
 
-        # Latin Hypercube Sampling
-        # Divide each dimension into n_samples strata and sample once from each
-        samples = torch.zeros((n_samples, n_dim), dtype=torch.float64, device=device)
-
-        for d in range(n_dim):
-            min_val, max_val = self.bounds[d]
-            # Permutation of strata
-            perm = torch.randperm(n_samples, generator=generator)
-            # Sample within each stratum
-            stratum_size = (max_val - min_val) / n_samples
-            samples[:, d] = min_val + (perm + torch.rand(n_samples, generator=generator)) * stratum_size
-
-        return samples
+    def _get_backend(self):
+        """Get the backend instance based on current settings."""
+        if self.backend == "sober":
+            return SoberBackend(bounds=self.bounds, n_init=self.n_init, seed=self.seed)
+        elif self.backend == "botorch":
+            return BotorchBackend(bounds=self.bounds, n_init=self.n_init, seed=self.seed)
+        else:
+            backend = SimpleBackend(bounds=self.bounds, n_init=self.n_init, seed=self.seed)
+            backend.maximize = self._maximize
+            return backend
 
     def optimize(
         self,
@@ -168,16 +176,18 @@ class BayesianOptimizer:
         if device is None:
             device = torch.device("cpu")
 
-        n_dim = len(self.bounds)
-        bounds_tensor = torch.tensor(self.bounds, dtype=torch.float64, device=device)  # (n_dim, 2)
+        self._maximize = maximize
+
+        # Get the appropriate backend
+        backend = self._get_backend()
 
         # Phase 1: Initial random sampling
         if verbose:
+            backend_name = self.backend.upper()
             print(f"Phase 1: Initial random sampling ({self.n_init} samples)")
+            print(f"  Backend: {backend_name}")
 
         X_init = self._initialize_random(self.n_init, device)
-
-        # Evaluate objective at initial points
         y_init = objective(X_init)
 
         # Ensure y has correct shape
@@ -188,6 +198,7 @@ class BayesianOptimizer:
 
         self.X_observed = X_init
         self.y_observed = y_init
+        backend.update(X_init, y_init)
 
         # Find best initial point
         if maximize:
@@ -207,7 +218,7 @@ class BayesianOptimizer:
 
         for iteration in range(self.n_iter):
             # Generate next candidate point using acquisition function
-            X_candidate = self._suggest_next(bounds_tensor, device)
+            X_candidate = backend.suggest_next(device)
 
             # Evaluate objective
             y_candidate = objective(X_candidate)
@@ -219,6 +230,7 @@ class BayesianOptimizer:
                 y_candidate = y_candidate.squeeze()
 
             # Update observed data
+            backend.update(X_candidate.unsqueeze(0), y_candidate)
             self.X_observed = torch.cat([self.X_observed, X_candidate.unsqueeze(0)], dim=0)
             self.y_observed = torch.cat([self.y_observed, y_candidate], dim=0)
 
@@ -241,168 +253,6 @@ class BayesianOptimizer:
             print(f"  Best parameters: {X_best.cpu().numpy()}")
 
         return X_best, y_best
-
-    def _suggest_next(
-        self,
-        bounds: torch.Tensor,
-        device: torch.device,
-    ) -> torch.Tensor:
-        """Suggest next point to evaluate using acquisition function.
-
-        Args:
-            bounds: Parameter bounds tensor, shape (n_dim, 2)
-            device: Device for computation
-
-        Returns:
-            Suggested point, shape (n_dim,)
-        """
-        if self.backend == "sober":
-            return self._suggest_sober(bounds, device)
-        elif self.backend == "botorch":
-            return self._suggest_botorch(bounds, device)
-        else:
-            # Simple fallback: Thompson sampling with random perturbation
-            return self._suggest_thompson(bounds, device)
-
-    def _suggest_sober(
-        self,
-        bounds: torch.Tensor,
-        device: torch.device,
-    ) -> torch.Tensor:
-        """Use SOBER for acquisition function optimization.
-
-        SOBER (Sequential Optimization using Ensemble of Regressors)
-        uses an ensemble of neural networks as the surrogate model.
-
-        Reference: https://github.com/ma921/SOBER
-        """
-        try:
-            from sober import Sober
-        except ImportError:
-            return self._suggest_thompson(bounds, device)
-
-        # Convert to numpy for SOBER
-        X_np = self.X_observed.cpu().numpy()
-        y_np = self.y_observed.cpu().numpy()
-        bounds_np = bounds.cpu().numpy()
-
-        # Create SOBER optimizer
-        sober_optimizer = Sober(
-            X=X_np,
-            y=y_np,
-            n_init=0,  # We already have initial samples
-            bounds=bounds_np,
-        )
-
-        # Get next suggestion
-        X_next_np = sober_optimizer.suggest(n_samples=1)
-
-        return torch.tensor(X_next_np[0], dtype=torch.float64, device=device)
-
-    def _suggest_botorch(
-        self,
-        bounds: torch.Tensor,
-        device: torch.device,
-    ) -> torch.Tensor:
-        """Use botorch for acquisition function optimization.
-
-        Uses Expected Improvement (EI) as the acquisition function with
-        a Gaussian Process surrogate model.
-
-        Reference: https://botorch.org/
-        """
-        try:
-            from botorch import fit_gpytorch_model
-            from botorch.acquisition import ExpectedImprovement
-            from botorch.optim import optimize_acqf
-            from botorch.models import SingleTaskGP
-            from botorch.models.transforms import Standardize
-            from gpytorch.mlls import ExactMarginalLogLikelihood
-        except ImportError:
-            return self._suggest_thompson(bounds, device)
-
-        # botorch expects specific shapes
-        # X: (n, d) with n as batch dimension, d as feature dimension
-        # y: (n, 1)
-
-        X = self.X_observed.clone()
-        y = self.y_observed.unsqueeze(-1).clone()
-
-        # Define bounds for optimization (normalized to [0, 1]^d)
-        bounds_normalized = torch.tensor([[0.0, 1.0]] * len(self.bounds),
-                                         dtype=torch.float64, device=device)
-
-        # Normalize X to [0, 1]
-        X_normalized = torch.zeros_like(X)
-        for d, (min_val, max_val) in enumerate(self.bounds):
-            X_normalized[:, d] = (X[:, d] - min_val) / (max_val - min_val)
-
-        # Fit GP model
-        gp = SingleTaskGP(X_normalized, y, outcome_transform=Standardize(m=1))
-        mll = ExactMarginalLogLikelihood(gp.likelihood, gp)
-        fit_gpytorch_model(mll)
-
-        # Compute acquisition function
-        best_value = y.max().item()
-        EI = ExpectedImprovement(model=gp, best_f=best_value)
-
-        # Optimize acquisition function
-        candidate, _ = optimize_acqf(
-            acq_function=EI,
-            bounds=bounds_normalized,
-            q=1,
-            num_restarts=10,
-            raw_samples=100,
-        )
-
-        # Denormalize candidate
-        candidate_original = torch.zeros_like(candidate.squeeze())
-        for d, (min_val, max_val) in enumerate(self.bounds):
-            candidate_original[d] = candidate[0, d] * (max_val - min_val) + min_val
-
-        return candidate_original
-
-    def _suggest_thompson(
-        self,
-        bounds: torch.Tensor,
-        device: torch.device,
-    ) -> torch.Tensor:
-        """Simple Thompson sampling fallback.
-
-        Fits a simple GP using scikit-learn and samples from the posterior.
-        This is a fallback when neither SOBER nor botorch are available.
-        """
-        # Try to use scikit-learn for simple GP
-        try:
-            from sklearn.gaussian_process import GaussianProcessRegressor
-            from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C
-
-            X_np = self.X_observed.cpu().numpy()
-            y_np = self.y_observed.cpu().numpy()
-
-            # Fit GP
-            kernel = C(1.0) * RBF(length_scale=1.0)
-            gp = GaussianProcessRegressor(kernel=kernel, random_state=self.seed)
-            gp.fit(X_np, y_np)
-
-            # Sample from posterior at random points
-            n_candidates = 100
-            X_random = self._initialize_random(n_candidates, device)
-            X_random_np = X_random.cpu().numpy()
-
-            posterior_mean, posterior_std = gp.predict(X_random_np, return_std=True)
-
-            # Thompson sampling: sample from posterior
-            posterior_sample = posterior_mean + posterior_std * np.random.randn(len(posterior_mean))
-
-            # Select best candidate
-            best_idx = np.argmin(posterior_sample) if not hasattr(self, '_maximize') or not self._maximize else np.argmax(posterior_sample)
-
-            return torch.tensor(X_random_np[best_idx], dtype=torch.float64, device=device)
-
-        except ImportError:
-            # Fallback to pure random search
-            return self._initialize_random(1, device).squeeze(0)
 
     def get_best(self) -> Tuple[Optional[torch.Tensor], Optional[float]]:
         """Get the best observation so far.
@@ -571,3 +421,15 @@ class MultiObjectiveOptimizer:
         y_pareto = torch.tensor(y[is_pareto], dtype=torch.float64)
 
         return X_pareto, y_pareto
+
+
+__all__ = [
+    "BayesianOptimizer",
+    "MultiObjectiveOptimizer",
+    "SoberBackend",
+    "BotorchBackend",
+    "SimpleBackend",
+    "run_sober_optimization",
+    "run_botorch_optimization",
+    "run_simple_optimization",
+]
