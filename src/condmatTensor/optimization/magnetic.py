@@ -101,19 +101,63 @@ class EffectiveArrayOptimizer:
     def _detect_f_orbitals(self) -> List[int]:
         """Detect f-orbital indices from orbital names.
 
+        For spinful systems, detects both f_up and f_down orbitals.
+
         Returns:
             List of orbital indices identified as f-orbitals
         """
         if self.H_full.orbital_names is None:
-            # Default: assume last orbital is f
-            return [self.H_full.shape[-1] - 1]
+            # Fallback: assume last 2 orbitals are f-up and f-down (if spinful)
+            N_orb = self.H_full.shape[-1]
+            if N_orb % 2 == 0 and self._is_already_spinful(self.H_full):
+                return [N_orb - 2, N_orb - 1]  # Both spin states
+            else:
+                return [N_orb - 1]  # Single orbital
 
         f_indices = []
         for i, name in enumerate(self.H_full.orbital_names):
             if 'f' in name.lower():
                 f_indices.append(i)
 
+        # If spinful and only f-orbital base name detected, include both spins
+        if len(f_indices) == 1 and self._is_already_spinful(self.H_full):
+            idx = f_indices[0]
+            # Check if this is f_up (look for f_down) or f_down (look for f_up)
+            if idx + 1 < len(self.H_full.orbital_names):
+                next_name = self.H_full.orbital_names[idx + 1]
+                if 'f' in next_name.lower() and idx + 1 not in f_indices:
+                    f_indices.append(idx + 1)
+            if idx - 1 >= 0:
+                prev_name = self.H_full.orbital_names[idx - 1]
+                if 'f' in prev_name.lower() and idx - 1 not in f_indices:
+                    f_indices.insert(0, idx - 1)
+
         return f_indices if f_indices else [self.H_full.shape[-1] - 1]
+
+    def _is_already_spinful(self, H: "BaseTensor") -> bool:
+        """Detect if Hamiltonian is already spinful.
+
+        Checks:
+        1. Even number of orbitals
+        2. Orbital names contain '_up'/'_down' suffix
+        3. If lattice provided: num_orbitals entries are even
+
+        Returns:
+            True if Hamiltonian is already spinful, False otherwise
+        """
+        N_orb = H.shape[-1]
+        if N_orb % 2 != 0:
+            return False
+
+        # Check orbital names for spin suffix
+        if H.orbital_names:
+            return any('_up' in name or '_down' in name for name in H.orbital_names)
+
+        # If lattice provided, check if num_orbitals are even
+        if self.lattice is not None:
+            return all(n % 2 == 0 for n in self.lattice.num_orbitals)
+
+        return False
 
     def _get_n_k(self) -> int:
         """Get number of k-points from Hamiltonian."""
@@ -152,12 +196,22 @@ class EffectiveArrayOptimizer:
             (J_eff, S_eff) tuple of optimized parameters
         """
         from condmatTensor.optimization.bayesian import BayesianOptimizer
+        from condmatTensor.core import get_device
 
         if device is None:
-            device = self.H_cc_0.tensor.device
+            # Prefer CUDA if available for SOBER backend
+            device = get_device("cuda" if torch.cuda.is_available() else "cpu")
 
         if S_bounds is None:
             S_bounds = (-1.0, 1.0)
+
+        # Move Hamiltonians to target device for optimization
+        # This is critical for SOBER backend which runs on GPU
+        original_device_cc = self.H_cc_0.tensor.device
+        original_device_full = self.H_full.tensor.device
+
+        self.H_cc_0 = self.H_cc_0.to(device)
+        self.H_full = self.H_full.to(device)
 
         # Define objective function
         def objective(params: torch.Tensor) -> torch.Tensor:
@@ -174,6 +228,13 @@ class EffectiveArrayOptimizer:
             if params.dim() == 1:
                 params = params.unsqueeze(0)  # (1, 4)
 
+            # Detect device from input params (important for SOBER which may use CUDA)
+            param_device = params.device
+
+            # Ensure Hamiltonians are on the same device as params
+            H_full_device = self.H_full.to(param_device)
+            H_cc_0_device = self.H_cc_0.to(param_device)
+
             n_samples = params.shape[0]
             losses = []
 
@@ -181,11 +242,12 @@ class EffectiveArrayOptimizer:
                 J = params[i, 0].item()
                 S = params[i, 1:]
 
-                # Build effective Hamiltonian
-                H_eff = self._build_effective_hamiltonian(J, S, device)
+                # Build effective Hamiltonian on the same device as params
+                H_eff = self._build_effective_hamiltonian(J, S, param_device,
+                                                         H_cc_0=H_cc_0_device)
 
                 # Compute eigenvalues
-                eig_full = self._compute_eigenvalues(self.H_full)
+                eig_full = self._compute_eigenvalues(H_full_device)
                 eig_eff = self._compute_eigenvalues(H_eff)
 
                 # L2 norm (handle different number of bands by padding)
@@ -222,26 +284,33 @@ class EffectiveArrayOptimizer:
             print(f"  Backend: {backend.upper()}")
             print(f"  J bounds: {J_bounds}")
             print(f"  S bounds: {S_bounds}")
+            print(f"  Device: {device}")
 
-        X_best, loss = optimizer.optimize(objective, maximize=False, verbose=verbose, device=device)
+        try:
+            X_best, loss = optimizer.optimize(objective, maximize=False, verbose=verbose, device=device)
 
-        # Extract results
-        self.J_eff = X_best[0].item()
-        self.S_eff = X_best[1:]
+            # Extract results
+            self.J_eff = X_best[0].item()
+            self.S_eff = X_best[1:]
 
-        if verbose:
-            print(f"\nOptimization complete!")
-            print(f"  J_eff = {self.J_eff:.6f}")
-            print(f"  S_eff = [{self.S_eff[0]:.6f}, {self.S_eff[1]:.6f}, {self.S_eff[2]:.6f}]")
-            print(f"  Final loss = {loss:.6e}")
+            if verbose:
+                print(f"\nOptimization complete!")
+                print(f"  J_eff = {self.J_eff:.6f}")
+                print(f"  S_eff = [{self.S_eff[0]:.6f}, {self.S_eff[1]:.6f}, {self.S_eff[2]:.6f}]")
+                print(f"  Final loss = {loss:.6e}")
 
-        return self.J_eff, self.S_eff
+            return self.J_eff, self.S_eff
+        finally:
+            # Restore Hamiltonians to their original devices
+            self.H_cc_0 = self.H_cc_0.to(original_device_cc)
+            self.H_full = self.H_full.to(original_device_full)
 
     def _build_effective_hamiltonian(
         self,
         J: float,
         S: torch.Tensor,
         device: torch.device,
+        H_cc_0: Optional["BaseTensor"] = None,
     ) -> "BaseTensor":
         """Build effective Hamiltonian H_eff = H_cc_0 + J @ S.
 
@@ -249,6 +318,7 @@ class EffectiveArrayOptimizer:
             J: Coupling strength
             S: Spin vector (3,) for (Sx, Sy, Sz)
             device: Device for computation
+            H_cc_0: Optional H_cc_0 tensor (must be on same device as `device`)
 
         Returns:
             BaseTensor with effective Hamiltonian
@@ -256,26 +326,53 @@ class EffectiveArrayOptimizer:
         from condmatTensor.core import BaseTensor
         from condmatTensor.manybody.magnetic import LocalMagneticModel
 
-        # Build spinful H_cc_0 if needed
-        N_orb_cc = self.H_cc_0.shape[-1]
+        # Use provided H_cc_0 or fall back to instance variable
+        if H_cc_0 is None:
+            H_cc_0 = self.H_cc_0
 
-        # Check if already spinful (even number of orbitals, assumed spinor)
-        if N_orb_cc % 2 == 0:
-            # Assume spinful already
-            H_eff = self.H_cc_0.tensor.clone()
+        # Build spinful H_cc_0 if needed
+        is_spinful = self._is_already_spinful(H_cc_0)
+
+        if is_spinful:
+            H_eff = H_cc_0.tensor.clone().to(device)
         else:
             # Build spinful from spinless
             model = LocalMagneticModel()
-            H_cc_0_spinful = model.build_spinful_hamiltonian(self.H_cc_0, lattice=self.lattice)
-            H_eff = H_cc_0_spinful.tensor.clone()
+            H_cc_0_spinful = model.build_spinful_hamiltonian(H_cc_0, lattice=self.lattice)
+            H_eff = H_cc_0_spinful.tensor.clone().to(device)
+            is_spinful = True  # Now it's spinful
 
-        # Add J@S term
+        # Add J@S term (on-site exchange coupling)
+        # Reference: Kondo/s-d model - J couples to TOTAL electron spin at each lattice site
+        # Sources:
+        #   * "Kondo breakdown in multi-orbital Anderson lattices" - Eickhoff et al., SciPost Phys. 17, 069 (2024)
+        #     https://scipost.org/SciPostPhys.17.3.069/pdf
+        #   * "The Kondo Problem to Heavy Fermions" - Hewson, Cambridge (1993)
+        #   * "Ferromagnetic Kondo-lattice models" - Nolting, PSSb 250 (2003)
+        #
+        # The J@S term is an ON-SITE interaction, not per-orbital.
+        # For a site with multiple orbitals, J couples to the TOTAL spin at that site.
         if self.lattice is not None:
-            # Use per-site orbital info from lattice
-            # Add J@S to all sites (uniform coupling)
-            spinful_offset = 0
+            # Compute cumulative spinful offsets for each site
+            spinful_offsets = [0]
+            for n_orb_site in self.lattice.num_orbitals:
+                # Determine if n_orb_site is spinless or already spinful
+                if n_orb_site % 2 == 0 and is_spinful:
+                    n_spinful_site = n_orb_site
+                else:
+                    n_spinful_site = 2 * n_orb_site
+                spinful_offsets.append(spinful_offsets[-1] + n_spinful_site)
+
+            # Add J@S to each site (uniform coupling)
             for site_idx, n_orb_site in enumerate(self.lattice.num_orbitals):
-                # Create J@S term (2×2 Pauli matrix)
+                # Determine the spinful orbital range for this site
+                spinful_start = spinful_offsets[site_idx]
+                spinful_end = spinful_offsets[site_idx + 1]
+                n_spinful_site = spinful_end - spinful_start
+
+                # Create J@S term (Pauli matrix in spin space)
+                # H_J = J * (Sx*σx + Sy*σy + Sz*σz)
+                # For the TOTAL electron spin at this site:
                 Sx, Sy, Sz = S
                 J_term = torch.zeros((2, 2), dtype=torch.complex128, device=device)
                 J_term[0, 0] = J * Sz
@@ -283,17 +380,19 @@ class EffectiveArrayOptimizer:
                 J_term[1, 0] = J * (Sx + 1j * Sy)
                 J_term[1, 1] = -J * Sz
 
-                # Add to each orbital at this site
+                # Add J@S term to the TOTAL spin at this site
+                # For each orbital at this site, add the same J@S term
+                # (acting on the spin degree of freedom of that orbital)
                 N_k = H_eff.shape[0] if H_eff.dim() == 3 else 1
-                for orb_i in range(n_orb_site):
-                    idx_i = spinful_offset + 2*orb_i
+                n_orbital_pairs = n_spinful_site // 2
+
+                for orb_i in range(n_orbital_pairs):
+                    idx_i = spinful_start + 2*orb_i
                     for k in range(N_k):
                         if H_eff.dim() == 3:
                             H_eff[k, idx_i:idx_i+2, idx_i:idx_i+2] += J_term
                         else:
                             H_eff[idx_i:idx_i+2, idx_i:idx_i+2] += J_term
-
-                spinful_offset += 2 * n_orb_site
         else:
             # Old behavior: add to first orbital as on-site magnetic exchange
             N_orb_spinful = H_eff.shape[-1]

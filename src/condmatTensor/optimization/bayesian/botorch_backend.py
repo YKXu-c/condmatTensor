@@ -121,7 +121,12 @@ class BotorchBackend:
         # y: (n, 1)
 
         X = self.X_observed.clone()
-        y = self.y_observed.unsqueeze(-1).clone()
+        y = self.y_observed.clone()
+        # Ensure y is 2D with shape (n, 1)
+        if y.dim() == 1:
+            y = y.unsqueeze(-1)
+        elif y.dim() > 2:
+            y = y.squeeze()
 
         # Define bounds for optimization (normalized to [0, 1]^d)
         # BoTorch expects bounds as (2, d) tensor

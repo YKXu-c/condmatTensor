@@ -45,7 +45,6 @@ import numpy as np
 from condmatTensor.core import is_cuda_available, get_device
 from condmatTensor.lattice import BravaisLattice, TightBindingModel, generate_kmesh, generate_k_path
 from condmatTensor.solvers import diagonalize
-from condmatTensor.analysis import compute_dos
 from condmatTensor.optimization import BayesianOptimizer
 
 
@@ -116,7 +115,7 @@ def benchmark_hamiltonian_construction(
     for nk in nk_list:
         trial_times = []
         for _ in range(n_trials):
-            k_mesh = generate_kmesh(lattice, nk=nk)
+            k_mesh = generate_kmesh(lattice, nk=nk, device=device)
 
             start = time.time()
             Hk = tb_model.build_Hk(k_mesh)
@@ -200,8 +199,8 @@ def benchmark_dos(
     for nk in nk_list:
         trial_times = []
         for _ in range(n_trials):
-            k_mesh = generate_kmesh(lattice, nk=nk)
-            Hk = tb_model.build_Hk(k_mesh).to(device)
+            k_mesh = generate_kmesh(lattice, nk=nk, device=device)
+            Hk = tb_model.build_Hk(k_mesh)
 
             start = time.time()
             # Compute eigenvalues
@@ -248,11 +247,15 @@ def benchmark_bayesian_optimization(
     # Simple 2D test function (Rosenbrock)
     def objective(X):
         """Rosenbrock function: f(x,y) = (a-x)^2 + b(y-x^2)^2"""
+        # Handle both single sample (1D) and batch (2D) inputs
+        if X.dim() == 1:
+            X = X.unsqueeze(0)
         a = 1.0
         b = 100.0
         x = X[:, 0]
         y = X[:, 1]
-        return (a - x) ** 2 + b * (y - x ** 2) ** 2
+        result = (a - x) ** 2 + b * (y - x ** 2) ** 2
+        return result.squeeze() if result.numel() == 1 else result
 
     bounds = [(-2.0, 2.0), (-1.0, 3.0)]
 
@@ -310,7 +313,7 @@ def run_benchmark(device_only: str = None) -> dict:
 
     for device in devices_to_test:
         print(f"\n{'=' * 70}")
-        print(f"Running benchmarks on {device.upper()}")
+        print(f"Running benchmarks on {device}")
         print('=' * 70)
 
         # Move model to device
@@ -425,7 +428,7 @@ def plot_benchmark_results(
         # Single device
         device = devices[0]
         time_val = results[device]['bayesian_opt']
-        ax.bar([device.upper()], [time_val], color=colors.get(device, 'gray'),
+        ax.bar([device.upper()], [time_val], color=colors.get(str(device), 'gray'),
                alpha=0.7, edgecolor='black', linewidth=2)
         ax.set_ylabel('Time (seconds)', fontsize=12)
         ax.set_title('Bayesian Optimization (10+30 iterations)', fontsize=13, fontweight='bold')

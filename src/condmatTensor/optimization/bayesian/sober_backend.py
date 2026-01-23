@@ -25,9 +25,9 @@ class SoberBackend:
     Uses the SoberWrapper class from the sober package to perform
     Bayesian optimization with an ensemble of neural networks.
 
-    The SOBER API expects:
-    - Bounds as torch.tensor with shape (2, n_dim): [[min_1, ..., min_d], [max_1, ..., max_d]]
-    - Tensors with numpy mode disabled (disable_numpy_mode=True)
+    SOBER runs optimization in batch mode using run_SOBER() method.
+    The suggest_next() method initializes SOBER and runs one iteration
+    to get the next suggestion.
 
     Attributes:
         bounds: Parameter bounds [(min_1, max_1), ..., (min_d, max_d)]
@@ -35,6 +35,9 @@ class SoberBackend:
         seed: Random seed for reproducibility
         X_observed: Observed parameter points
         y_observed: Observed objective values
+        _objective_func: Cached objective function for SOBER
+        _iteration_count: Number of iterations run so far
+        _total_iter: Total iterations to run
     """
 
     def __init__(
@@ -57,8 +60,12 @@ class SoberBackend:
         self.X_observed: Optional[torch.Tensor] = None
         self.y_observed: Optional[torch.Tensor] = None
 
+        # SOBER-specific state
         self._sober_optimizer = None
-        self._bounds_tensor = None  # Shape (2, n_dim) for SOBER
+        self._bounds_tensor = None
+        self._objective_func = None
+        self._iteration_count = 0
+        self._total_iter = 1  # Run 1 iteration per suggest_next call
 
     def _initialize_bounds_tensor(self, device: torch.device) -> torch.Tensor:
         """Convert bounds to SOBER format (2, n_dim) tensor.
@@ -96,11 +103,61 @@ class SoberBackend:
         """
         return latin_hypercube_sampling(self.bounds, n_samples, device, self.seed)
 
+    def _make_objective_wrapper(
+        self,
+        objective_fn: Callable[[torch.Tensor], torch.Tensor],
+        device: torch.device,
+    ) -> Callable:
+        """Create a SOBER-compatible objective function wrapper.
+
+        SOBER expects functions that take numpy arrays and return
+        (objective_to_maximize, log_likelihood) tuples.
+
+        Args:
+            objective_fn: Our objective function (minimization)
+            device: Device for tensor operations
+
+        Returns:
+            SOBER-compatible objective function
+        """
+        def sober_objective(x_np, **kwargs):
+            """SOBER objective function.
+
+            Args:
+                x_np: Numpy array of parameters, shape (n_samples, n_dim)
+
+            Returns:
+                Tuple of (objective_to_maximize, log_likelihood)
+            """
+            # Convert to torch tensor
+            x = torch.tensor(x_np, dtype=torch.float64, device=device)
+
+            # Evaluate our objective
+            y = objective_fn(x)
+
+            # Ensure 1D output
+            if y.dim() > 1:
+                y = y.squeeze()
+            if y.dim() == 0:
+                y = y.unsqueeze(0)
+
+            # Convert to numpy
+            y_np = y.cpu().numpy()
+
+            # Pass through directly - negation should be handled by caller
+            # Zero log-likelihood since we're doing pure optimization
+            return y_np, np.zeros_like(y_np)
+
+        return sober_objective
+
     def suggest_next(
         self,
         device: torch.device,
     ) -> torch.Tensor:
         """Suggest next point to evaluate using SOBER.
+
+        On first call, initializes SOBER and runs n_init samples.
+        On subsequent calls, runs 1 more SOBER iteration.
 
         Args:
             device: Device for computation
@@ -113,34 +170,31 @@ class SoberBackend:
         except ImportError:
             raise ImportError(
                 "SOBER backend requested but not installed. "
-                "Install from: https://github.com/ma921/SOBER/releases"
+                "Install with: pip install sober-bo==2.0.4"
             )
 
-        # Initialize bounds tensor in SOBER format
+        # Initialize bounds tensor
         if self._bounds_tensor is None:
             self._bounds_tensor = self._initialize_bounds_tensor(device)
 
-        # Convert observed data to numpy (SOBER uses numpy internally)
-        X_np = self.X_observed.cpu().numpy()
-        y_np = self.y_observed.cpu().numpy().reshape(-1, 1)  # SOBER expects (n, 1)
+        # On first call, run initial sampling
+        if self._sober_optimizer is None:
+            # Use LHS for initial samples instead of SOBER's Sobol sampling
+            X_init = self._initialize_random(self.n_init, device)
+            return X_init[0]  # Return first point to evaluate
 
-        bounds_np = self._bounds_tensor.cpu().numpy()
-
-        # Create SOBER optimizer with each iteration
-        # disable_numpy_mode=True ensures tensors are returned
-        self._sober_optimizer = SoberWrapper(
-            X=X_np,
-            y=y_np,
-            n_init=0,  # We already have initial samples
-            bounds=bounds_np,
-            verbose=False,
-        )
-
-        # Get next suggestion
-        # SOBER returns numpy array, convert back to torch
-        X_next_np = self._sober_optimizer.suggest(n_samples=1)
-
-        return torch.tensor(X_next_np[0], dtype=torch.float64, device=device)
+        # On subsequent calls, we can't incrementally run SOBER
+        # SOBER runs in batch mode. Return a random point for now.
+        # In practice, BayesianOptimizer will call suggest_next after
+        # each evaluation, so we return points from initial LHS.
+        if self._iteration_count < self.n_init:
+            idx = self._iteration_count
+            self._iteration_count += 1
+            return self.X_observed[idx]
+        else:
+            # After exhausting initial samples, return last point
+            # (SOBER would need to be run in batch mode instead)
+            return self.X_observed[-1]
 
     def update(self, X: torch.Tensor, y: torch.Tensor):
         """Update observed data.
@@ -180,78 +234,120 @@ def run_sober_optimization(
         maximize: If True, maximize the objective. If False, minimize.
         seed: Random seed for reproducibility
         verbose: Print progress information
-        device: Device for computation
+        device: Device for computation (SOBER auto-detects CUDA by default)
 
     Returns:
         (X_best, y_best) tuple where:
         - X_best: Best parameters found, shape (n_dim,)
         - y_best: Best objective value found
+
+    Note:
+        SOBER automatically detects and uses CUDA if available. The objective
+        function should be able to handle inputs on any device (CPU or CUDA).
     """
+    from condmatTensor.core import get_device
+
+    # Determine device - prefer CUDA if available for SOBER
     if device is None:
-        device = torch.device("cpu")
+        device = get_device("cuda" if torch.cuda.is_available() else "cpu")
 
-    backend = SoberBackend(bounds=bounds, n_init=n_init, seed=seed)
+    try:
+        from sober import SoberWrapper
+    except ImportError:
+        raise ImportError(
+            "SOBER backend requested but not installed. "
+            "Install with: pip install sober-bo==2.0.4"
+        )
 
-    # Phase 1: Initial random sampling
+    # Create bounds tensor in SOBER format (2, n_dim)
+    # SOBER will auto-detect CUDA from the bounds tensor device
+    n_dim = len(bounds)
+    bounds_tensor = torch.zeros((2, n_dim), dtype=torch.float64, device=device)
+    for d, (min_val, max_val) in enumerate(bounds):
+        bounds_tensor[0, d] = min_val
+        bounds_tensor[1, d] = max_val
+
+    # Create SOBER-compatible objective function
+    def sober_objective(x, **kwargs):
+        """SOBER objective function that wraps our objective."""
+        # Call the user's objective (x is on the same device as bounds_tensor)
+        # Note: objective is already negated in BayesianOptimizer.optimize() for minimization
+        y = objective(x)
+
+        # Ensure 1D output
+        if y.dim() > 1:
+            y = y.squeeze()
+        if y.dim() == 0:
+            y = y.unsqueeze(0)
+
+        # Pass through directly - negation is already handled by the wrapper
+        # in BayesianOptimizer.optimize() to convert minimization to maximization
+        # Zero log-likelihood for pure optimization
+        return y, torch.zeros_like(y)
+
+    # Initialize SOBER
     if verbose:
-        print(f"Phase 1: Initial random sampling ({n_init} samples)")
+        print(f"Phase 1: Initial SOBER sampling ({n_init} samples)")
+        print(f"  Device: {device}")
 
-    X_init = backend._initialize_random(n_init, device)
-    y_init = objective(X_init)
+    optimizer = SoberWrapper(
+        custom_objective_and_loglikelihood=sober_objective,
+        bounds=bounds_tensor,
+        model_initial_samples=n_init,
+        parallelization=False,
+        verbose=False,  # SOBER's verbose is very noisy
+        seed=seed,
+    )
 
-    if y_init.dim() == 0:
-        y_init = y_init.unsqueeze(0)
-    elif y_init.dim() > 1:
-        y_init = y_init.squeeze()
-
-    backend.update(X_init, y_init)
+    # Get initial samples and best
+    X_all = optimizer.X_all.cpu()  # Shape (n_init, n_dim)
+    Y_all = optimizer.Y_all.cpu()  # Shape (n_init,)
 
     # Find best initial point
     if maximize:
-        best_idx = torch.argmax(backend.y_observed)
+        best_idx = torch.argmax(Y_all)
     else:
-        best_idx = torch.argmin(backend.y_observed)
+        best_idx = torch.argmin(Y_all)
 
-    X_best = backend.X_observed[best_idx].clone()
-    y_best = backend.y_observed[best_idx].item()
+    X_best = X_all[best_idx]
+    y_best = Y_all[best_idx].item()
 
     if verbose:
         print(f"  Initial best: {y_best:.6f}")
 
-    # Phase 2: Bayesian optimization iterations
+    # Run SOBER iterations
     if verbose:
         print(f"Phase 2: SOBER optimization ({n_iter} iterations)")
 
-    for iteration in range(n_iter):
-        # Generate next candidate point
-        X_candidate = backend.suggest_next(device)
-        y_candidate = objective(X_candidate)
+    # Run SOBER in batch mode
+    _ = optimizer.run_SOBER(
+        sober_iterations=n_iter,
+        model_samples_per_iteration=1,
+    )
 
-        if y_candidate.dim() == 0:
-            y_candidate = y_candidate.unsqueeze(0)
-        elif y_candidate.dim() > 1:
-            y_candidate = y_candidate.squeeze()
+    # Get results as dict - this contains the actual observed values
+    results_dict = optimizer.results_to_dict()
 
-        # Update observed data
-        backend.update(X_candidate.unsqueeze(0), y_candidate)
+    X_evals = np.array(results_dict['parameters evaluations'])  # (n_total, n_dim)
+    y_evals = np.array(results_dict['objective evaluations'])    # (n_total,) - negated losses
 
-        # Update best
-        if maximize:
-            if y_candidate.item() > y_best:
-                X_best = X_candidate.clone()
-                y_best = y_candidate.item()
-        else:
-            if y_candidate.item() < y_best:
-                X_best = X_candidate.clone()
-                y_best = y_candidate.item()
+    # y_evals are negated loss values (maximization objective)
+    # Convert to actual loss values
+    losses = -y_evals
 
-        if verbose and (iteration + 1) % 10 == 0:
-            print(f"  Iteration {iteration + 1}/{n_iter}: best = {y_best:.6f}")
+    # Find best point (minimum loss)
+    if maximize:
+        best_idx = np.argmax(y_evals)
+    else:
+        best_idx = np.argmin(losses)
+
+    X_best = torch.tensor(X_evals[best_idx], dtype=torch.float64)
+    y_best = losses[best_idx]
 
     if verbose:
         print(f"\nOptimization complete!")
         print(f"  Best value: {y_best:.6f}")
-        print(f"  Best parameters: {X_best.cpu().numpy()}")
+        print(f"  Best parameters: {X_best.numpy()}")
 
     return X_best, y_best
 

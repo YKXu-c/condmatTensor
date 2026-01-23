@@ -180,18 +180,40 @@ class LocalMagneticModel:
                     H_spinful[:, 2*i+1, 2*j+1] = tensor[:, i, j]       # ↓↓
         else:
             # Apply spin doubling per-site
-            spinful_offset = 0
+            # CRITICAL FIX: Must copy ALL hopping (both intra-site AND inter-site)
+            #
+            # Reference: "Kondo lattice s-d model J exchange coupling"
+            # - Hopping exists between different lattice sites (e.g., Kagome A↔B, A↔C, B↔C)
+            # - Spinful Hamiltonian must preserve all k-dependent hopping terms
+            # - Sources:
+            #   * "Kondo breakdown in multi-orbital Anderson lattices" - Eickhoff et al., SciPost Phys. 17, 069 (2024)
+            #     https://scipost.org/SciPostPhys.17.3.069/pdf
+            #   * "Bilayer Kondo lattice models" - arXiv:2005.11342 (2020)
+            #     https://arxiv.org/pdf/2005.11342
+            #   * "Orbital-selective orthogonal metal transition" - Phys. Rev. B 86, 115113 (2012)
+            #     https://link.aps.org/doi/10.1103/PhysRevB.86.115113
 
-            for site_idx, n_orb_site in enumerate(lattice.num_orbitals):
-                offset = offsets[site_idx]
+            # Compute cumulative spinful offsets for each site
+            spinful_offsets = [0]
+            for n_orb_site in lattice.num_orbitals:
+                spinful_offsets.append(spinful_offsets[-1] + 2 * n_orb_site)
 
-                # Apply spin doubling for this site's orbitals
-                for i in range(n_orb_site):
-                    for j in range(n_orb_site):
-                        H_spinful[:, spinful_offset + 2*i, spinful_offset + 2*j] = tensor[:, offset + i, offset + j]      # ↑↑
-                        H_spinful[:, spinful_offset + 2*i + 1, spinful_offset + 2*j + 1] = tensor[:, offset + i, offset + j]  # ↓↓
+            # Iterate over ALL pairs of sites (including inter-site hopping)
+            for src_site_idx, n_src_orb in enumerate(lattice.num_orbitals):
+                src_offset = offsets[src_site_idx]
+                src_spinful_offset = spinful_offsets[src_site_idx]
 
-                spinful_offset += 2 * n_orb_site
+                for dst_site_idx, n_dst_orb in enumerate(lattice.num_orbitals):
+                    dst_offset = offsets[dst_site_idx]
+                    dst_spinful_offset = spinful_offsets[dst_site_idx]
+
+                    # Copy ALL hopping from src_site orbitals to dst_site orbitals
+                    # This includes both intra-site (src == dst) and inter-site (src != dst) hopping
+                    for i in range(n_src_orb):
+                        for j in range(n_dst_orb):
+                            # Spin-conserving hopping: ↑↑ and ↓↓
+                            H_spinful[:, dst_spinful_offset + 2*i, src_spinful_offset + 2*j] = tensor[:, dst_offset + i, src_offset + j]      # ↑↑
+                            H_spinful[:, dst_spinful_offset + 2*i + 1, src_spinful_offset + 2*j + 1] = tensor[:, dst_offset + i, src_offset + j]  # ↓↓
 
         # Add SOC if provided (off-diagonal spin terms)
         if soc_tensor is not None:
