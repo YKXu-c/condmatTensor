@@ -156,8 +156,9 @@ class TightBindingModel:
 
         N_k = len(k_path)
         n_orb = self.lattice.total_orbitals
+        device = k_path.device
 
-        Hk = torch.zeros((N_k, n_orb, n_orb), dtype=torch.complex128)
+        Hk = torch.zeros((N_k, n_orb, n_orb), dtype=torch.complex128, device=device)
 
         # Convert k-path to Cartesian once
         k_cart = k_path @ self.lattice.reciprocal_vectors().T  # (N_k, dim)

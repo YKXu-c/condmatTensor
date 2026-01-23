@@ -39,21 +39,23 @@ def latin_hypercube_sampling(
         torch.Size([10, 2])
     """
     n_dim = len(bounds)
-    generator = torch.Generator(device=device)
+    # Generator must be on CPU for randperm to work properly
+    generator = torch.Generator(device='cpu')
     if seed is not None:
         generator.manual_seed(seed)
 
-    samples = torch.zeros((n_samples, n_dim), dtype=torch.float64, device=device)
+    samples = torch.zeros((n_samples, n_dim), dtype=torch.float64, device='cpu')
 
     for d in range(n_dim):
         min_val, max_val = bounds[d]
         # Generate random permutation for stratified sampling
-        perm = torch.randperm(n_samples, generator=generator)
+        perm = torch.randperm(n_samples, generator=generator, device='cpu')
         stratum_size = (max_val - min_val) / n_samples
         # One sample from each stratum with random position within stratum
         samples[:, d] = min_val + (perm + torch.rand(n_samples, generator=generator)) * stratum_size
 
-    return samples
+    # Move to target device at the end
+    return samples.to(device)
 
 
 def compute_rmse(

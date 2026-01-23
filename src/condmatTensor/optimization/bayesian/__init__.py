@@ -107,7 +107,7 @@ class BayesianOptimizer:
             except ImportError:
                 raise ImportError(
                     "SOBER backend requested but not installed. "
-                    "Install from: https://github.com/ma921/SOBER/releases"
+                    "Install with: pip install sober-bo==2.0.4"
                 )
         elif backend == "botorch":
             try:
@@ -178,7 +178,38 @@ class BayesianOptimizer:
 
         self._maximize = maximize
 
-        # Get the appropriate backend
+        # Special handling for SOBER backend (batch mode)
+        # SOBER runs optimization in batch mode rather than incrementally
+        if self.backend == "sober":
+            # Wrap objective for SOBER (SOBER maximizes, so negate for minimization)
+            def sober_objective(X):
+                y = objective(X)
+                if not maximize:
+                    y = -y
+                return y
+
+            X_best, y_best = run_sober_optimization(
+                objective=sober_objective,
+                bounds=self.bounds,
+                n_init=self.n_init,
+                n_iter=self.n_iter,
+                maximize=True,  # SOBER always maximizes; we handle minimization in wrapper
+                seed=self.seed,
+                verbose=verbose,
+                device=device,
+            )
+
+            # Convert back to minimization convention if needed
+            if not maximize:
+                y_best = -y_best
+
+            # Store best result for get_best() compatibility
+            self.X_observed = X_best.unsqueeze(0)
+            self.y_observed = torch.tensor([y_best])
+
+            return X_best, y_best
+
+        # Get the appropriate backend (for botorch and simple backends)
         backend = self._get_backend()
 
         # Phase 1: Initial random sampling
