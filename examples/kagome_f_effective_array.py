@@ -17,10 +17,11 @@ reproduces the band structure of:
 Bayesian optimization to minimize the L2 norm of eigenvalue differences:
     min_{J, S} ||eig(H_full) - eig(H_eff)||^2
 
-**Expected Results:**
-- Optimized J_eff and S_eff
-- Band structure comparison showing good agreement
-- Verification metrics (MAE, RMSE, correlation)
+**Bayesian Optimization Backends:**
+- auto: Automatically detect best available backend (SOBER > BoTorch > Simple)
+- sober: Sequential Optimization using Ensemble of Regressors (preferred)
+- botorch: Gaussian Process with Expected Improvement
+- simple: Thompson sampling fallback
 
 Reference:
     - "Effective Hamiltonians for heavy fermion systems" - Coleman, PRB (1987)
@@ -32,7 +33,9 @@ from pathlib import Path
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+import argparse
 import torch
+import time
 import matplotlib.pyplot as plt
 
 from condmatTensor.core import BaseTensor
@@ -69,7 +72,6 @@ def build_kagome_hamiltonian(lattice: BravaisLattice, t: float = -1.0) -> BaseTe
     tb_model = TightBindingModel(lattice)
 
     # Nearest-neighbor hopping (must match kagome_bandstructure.py)
-    # Using add_hermitian=False to match the reference implementation
     # A <-> B hopping
     tb_model.add_hopping(0, 1, [0, 0], t, add_hermitian=False)
     tb_model.add_hopping(1, 0, [0, 0], t, add_hermitian=False)
@@ -156,10 +158,208 @@ def build_kagome_f_system(
     return lattice, H_full
 
 
+def compare_backends(
+    optimizer: EffectiveArrayOptimizer,
+    backends: list = ["auto", "botorch", "simple"],
+    n_init: int = 10,
+    n_iter: int = 30,
+    seed: int = 42,
+) -> dict:
+    """Run optimization with multiple backends and compare results.
+
+    Args:
+        optimizer: EffectiveArrayOptimizer instance to use for optimization
+        backends: List of backend names to test
+        n_init: Number of initial samples for Bayesian optimization
+        n_iter: Number of optimization iterations
+        seed: Random seed for reproducibility
+
+    Returns:
+        Dictionary containing results for each backend:
+        {
+            'backend_name': {
+                'J_eff': float,
+                'S_eff': np.ndarray,
+                'time': float,
+                'rmse': float,
+                'mae': float,
+                'correlation': float,
+            }
+        }
+    """
+    results = {}
+
+    for backend_name in backends:
+        print(f"\n{'=' * 70}")
+        print(f"Testing {backend_name.upper()} backend")
+        print('=' * 70)
+
+        # Reset optimizer for each run
+        optimizer.reset()
+
+        try:
+            # Time the optimization
+            start_time = time.time()
+
+            # Run optimization with specific backend
+            J_eff, S_eff = optimizer.optimize(
+                J_bounds=(0.01, 2.0),
+                n_init=n_init,
+                n_iter=n_iter,
+                backend=backend_name,
+                verbose=True,
+            )
+
+            elapsed_time = time.time() - start_time
+
+            # Get verification metrics
+            metrics = optimizer.verify(verbose=False)
+
+            results[backend_name] = {
+                'J_eff': J_eff,
+                'S_eff': S_eff.numpy() if isinstance(S_eff, torch.Tensor) else S_eff,
+                'time': elapsed_time,
+                'rmse': metrics['rmse'],
+                'mae': metrics['mean_absolute_error'],
+                'correlation': metrics['correlation'],
+            }
+
+            print(f"\n{backend_name.upper()} results:")
+            print(f"  J_eff = {J_eff:.6f}")
+            print(f"  S_eff = [{S_eff[0]:.6f}, {S_eff[1]:.6f}, {S_eff[2]:.6f}]")
+            print(f"  Time = {elapsed_time:.2f}s")
+            print(f"  RMSE = {metrics['rmse']:.6f}")
+            print(f"  MAE = {metrics['mean_absolute_error']:.6f}")
+            print(f"  Correlation = {metrics['correlation']:.6f}")
+
+        except ImportError as e:
+            print(f"\n{backend_name.upper()} backend not available: {e}")
+            print(f"  Skipping...")
+        except Exception as e:
+            import traceback
+            print(f"\n{backend_name.upper()} backend failed: {e}")
+            traceback.print_exc()
+            print(f"  Skipping...")
+
+    return results
+
+
+def plot_backend_comparison(results: dict, save_path: str = "kagome_f_backend_comparison.png"):
+    """Create 4-panel comparison plot for different backends.
+
+    Args:
+        results: Dictionary of backend results from compare_backends()
+        save_path: Path to save the figure
+    """
+    if not results:
+        print("No results to plot.")
+        return
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+
+    backend_names = list(results.keys())
+    n_backends = len(backend_names)
+
+    # Colors for different backends
+    colors = ['#3498db', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6']
+    backend_colors = [colors[i % len(colors)] for i in range(n_backends)]
+
+    # Panel 1: J_eff comparison (bar chart)
+    ax = axes[0, 0]
+    J_values = [results[b]['J_eff'] for b in backend_names]
+    bars = ax.bar(range(n_backends), J_values, color=backend_colors, alpha=0.7, edgecolor='black')
+    ax.set_xticks(range(n_backends))
+    ax.set_xticklabels([b.upper() for b in backend_names], fontsize=11)
+    ax.set_ylabel('$J_{eff}$', fontsize=12)
+    ax.set_title('Effective Exchange Parameter', fontsize=13, fontweight='bold')
+    ax.grid(axis='y', alpha=0.3)
+    for i, (bar, val) in enumerate(zip(bars, J_values)):
+        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(J_values) * 0.02,
+                f'{val:.4f}', ha='center', va='bottom', fontsize=10)
+
+    # Panel 2: Optimization time (bar chart)
+    ax = axes[0, 1]
+    times = [results[b]['time'] for b in backend_names]
+    bars = ax.bar(range(n_backends), times, color=backend_colors, alpha=0.7, edgecolor='black')
+    ax.set_xticks(range(n_backends))
+    ax.set_xticklabels([b.upper() for b in backend_names], fontsize=11)
+    ax.set_ylabel('Time (seconds)', fontsize=12)
+    ax.set_title('Optimization Time', fontsize=13, fontweight='bold')
+    ax.grid(axis='y', alpha=0.3)
+    for i, (bar, val) in enumerate(zip(bars, times)):
+        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(times) * 0.05,
+                f'{val:.1f}s', ha='center', va='bottom', fontsize=10)
+
+    # Panel 3: RMSE comparison (bar chart)
+    ax = axes[1, 0]
+    rmses = [results[b]['rmse'] for b in backend_names]
+    bars = ax.bar(range(n_backends), rmses, color=backend_colors, alpha=0.7, edgecolor='black')
+    ax.set_xticks(range(n_backends))
+    ax.set_xticklabels([b.upper() for b in backend_names], fontsize=11)
+    ax.set_ylabel('RMSE', fontsize=12)
+    ax.set_title('Root Mean Square Error', fontsize=13, fontweight='bold')
+    ax.grid(axis='y', alpha=0.3)
+    for i, (bar, val) in enumerate(zip(bars, rmses)):
+        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(rmses) * 0.05,
+                f'{val:.4f}', ha='center', va='bottom', fontsize=10)
+
+    # Panel 4: Correlation comparison (bar chart)
+    ax = axes[1, 1]
+    correlations = [results[b]['correlation'] for b in backend_names]
+    bars = ax.bar(range(n_backends), correlations, color=backend_colors, alpha=0.7, edgecolor='black')
+    ax.set_xticks(range(n_backends))
+    ax.set_xticklabels([b.upper() for b in backend_names], fontsize=11)
+    ax.set_ylabel('Correlation', fontsize=12)
+    ax.set_title('Eigenvalue Correlation', fontsize=13, fontweight='bold')
+    ax.set_ylim([0, 1.0])
+    ax.grid(axis='y', alpha=0.3)
+    for i, (bar, val) in enumerate(zip(bars, correlations)):
+        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.02,
+                f'{val:.4f}', ha='center', va='bottom', fontsize=10)
+
+    plt.suptitle('Bayesian Optimization Backend Comparison', fontsize=15, fontweight='bold', y=0.995)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    print(f"\nBackend comparison plot saved to {save_path}")
+
+
 def main():
     """Main function to run effective array optimization."""
+    parser = argparse.ArgumentParser(
+        description="Effective Array Optimizer for Kagome-F Lattice"
+    )
+    parser.add_argument(
+        "--backend",
+        type=str,
+        default="auto",
+        choices=["auto", "sober", "botorch", "simple"],
+        help="Bayesian optimization backend (default: auto)"
+    )
+    parser.add_argument(
+        "--compare",
+        action="store_true",
+        help="Compare all available backends instead of single optimization"
+    )
+    parser.add_argument(
+        "--n-init",
+        type=int,
+        default=10,
+        help="Number of initial samples for Bayesian optimization (default: 10)"
+    )
+    parser.add_argument(
+        "--n-iter",
+        type=int,
+        default=30,
+        help="Number of optimization iterations (default: 30)"
+    )
+
+    args = parser.parse_args()
+
     print("=" * 70)
-    print("Effective Array Optimizer for Kagome-F Lattice")
+    if args.compare:
+        print("Backend Comparison Mode")
+    else:
+        print("Effective Array Optimizer for Kagome-F Lattice")
     print("=" * 70)
 
     # System parameters
@@ -182,17 +382,14 @@ def main():
     H_cc_spinless = build_kagome_hamiltonian(lattice_cc, t)
     # Rebuild on k_path with correct hopping
     tb_cc = TightBindingModel(lattice_cc)
-    # A <-> B hopping
     tb_cc.add_hopping(0, 1, [0, 0], t, add_hermitian=False)
     tb_cc.add_hopping(1, 0, [0, 0], t, add_hermitian=False)
     tb_cc.add_hopping(0, 1, [-1, 0], t, add_hermitian=False)
     tb_cc.add_hopping(1, 0, [1, 0], t, add_hermitian=False)
-    # A <-> C hopping
     tb_cc.add_hopping(0, 2, [0, 0], t, add_hermitian=False)
     tb_cc.add_hopping(2, 0, [0, 0], t, add_hermitian=False)
     tb_cc.add_hopping(0, 2, [0, -1], t, add_hermitian=False)
     tb_cc.add_hopping(2, 0, [0, 1], t, add_hermitian=False)
-    # B <-> C hopping
     tb_cc.add_hopping(1, 2, [0, 0], t, add_hermitian=False)
     tb_cc.add_hopping(2, 1, [0, 0], t, add_hermitian=False)
     tb_cc.add_hopping(1, 2, [1, -1], t, add_hermitian=False)
@@ -206,13 +403,10 @@ def main():
     print(f"  H_cc_0: {H_cc_0.shape}")
     print(f"  H_full: {H_full.shape}")
 
-    # Note: For this example, we need to build spinful versions
-    # Build spinful H_cc_0
+    # Build spinful versions
     model = LocalMagneticModel()
     H_cc_0_spinful = model.build_spinful_hamiltonian(H_cc_0)
 
-    # For H_full, we also need spinful
-    # Let's rebuild with spinful orbitals
     import math
     sqrt3 = math.sqrt(3)
     a1 = torch.tensor([0.5, sqrt3 / 2])
@@ -230,22 +424,18 @@ def main():
     lattice_full_spinless = BravaisLattice(
         cell_vectors=cell_vectors,
         basis_positions=basis_positions,
-        num_orbitals=[1, 1, 1, 1],  # 4 sites, each with 1 orbital
+        num_orbitals=[1, 1, 1, 1],
     )
     tb_full = TightBindingModel(lattice_full_spinless, orbital_labels=orbital_labels_full)
-    # Kagome-Kagome hopping (must match kagome_with_f_bandstructure.py)
-    # Using add_hermitian=False to match the reference implementation
-    # A <-> B hopping
+    # Kagome-Kagome hopping
     tb_full.add_hopping("A", "B", [0, 0], t, add_hermitian=False)
     tb_full.add_hopping("B", "A", [0, 0], t, add_hermitian=False)
     tb_full.add_hopping("A", "B", [-1, 0], t, add_hermitian=False)
     tb_full.add_hopping("B", "A", [1, 0], t, add_hermitian=False)
-    # A <-> C hopping
     tb_full.add_hopping("A", "C", [0, 0], t, add_hermitian=False)
     tb_full.add_hopping("C", "A", [0, 0], t, add_hermitian=False)
     tb_full.add_hopping("A", "C", [0, -1], t, add_hermitian=False)
     tb_full.add_hopping("C", "A", [0, 1], t, add_hermitian=False)
-    # B <-> C hopping
     tb_full.add_hopping("B", "C", [0, 0], t, add_hermitian=False)
     tb_full.add_hopping("C", "B", [0, 0], t, add_hermitian=False)
     tb_full.add_hopping("B", "C", [1, -1], t, add_hermitian=False)
@@ -277,74 +467,95 @@ def main():
 
     print(f"F-orbital indices: {optimizer.f_indices}")
 
-    # Run optimization (fewer iterations for demonstration)
-    print("\nRunning optimization...")
-    J_eff, S_eff = optimizer.optimize(
-        J_bounds=(0.01, 2.0),
-        n_init=10,
-        n_iter=30,
-        verbose=True,
-    )
+    if args.compare:
+        # Compare all backends
+        print("\nRunning backend comparison...")
+        results = compare_backends(
+            optimizer,
+            backends=["auto", "botorch", "simple"],
+            n_init=args.n_init,
+            n_iter=args.n_iter,
+            seed=42,
+        )
 
-    # Verify the effective model
-    print("\n" + "=" * 70)
-    print("Verification")
-    print("=" * 70)
+        # Plot comparison
+        if results:
+            plot_backend_comparison(results)
 
-    metrics = optimizer.verify(verbose=True)
+        print("\n" + "=" * 70)
+        print("Backend comparison complete!")
+        print("=" * 70)
+    else:
+        # Single optimization with specified backend
+        print(f"\nRunning optimization with {args.backend.upper()} backend...")
 
-    # Plot comparison
-    print("\nGenerating comparison plot...")
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+        J_eff, S_eff = optimizer.optimize(
+            J_bounds=(0.01, 2.0),
+            n_init=args.n_init,
+            n_iter=args.n_iter,
+            backend=args.backend,
+            verbose=True,
+        )
 
-    # Eigenvalues comparison
-    eig_full = optimizer._compute_eigenvalues(optimizer.H_full)
-    H_eff = optimizer._build_effective_hamiltonian(J_eff, S_eff, optimizer.H_cc_0.tensor.device)
-    eig_eff = optimizer._compute_eigenvalues(H_eff)
+        # Verify the effective model
+        print("\n" + "=" * 70)
+        print("Verification")
+        print("=" * 70)
 
-    # Plot full system
-    k_axis = torch.arange(eig_full.shape[0], dtype=torch.float64)
-    for i in range(eig_full.shape[1]):
-        axes[0].plot(k_axis.numpy(), eig_full[:, i].cpu().numpy(), 'b-', alpha=0.6)
+        metrics = optimizer.verify(verbose=True)
 
-    axes[0].set_xlabel("k-path index", fontsize=12)
-    axes[0].set_ylabel("Energy ($|t|$)", fontsize=12)
-    axes[0].set_title("Full Kagome-F System", fontsize=12)
-    axes[0].grid(True, alpha=0.3)
+        # Plot comparison
+        print("\nGenerating comparison plot...")
+        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
-    # Plot effective model
-    for i in range(eig_eff.shape[1]):
-        axes[1].plot(k_axis.numpy(), eig_eff[:, i].cpu().numpy(), 'r-', alpha=0.8)
+        # Eigenvalues comparison
+        eig_full = optimizer._compute_eigenvalues(optimizer.H_full)
+        H_eff = optimizer._build_effective_hamiltonian(J_eff, S_eff, optimizer.H_cc_0.tensor.device)
+        eig_eff = optimizer._compute_eigenvalues(H_eff)
 
-    axes[1].set_xlabel("k-path index", fontsize=12)
-    axes[1].set_ylabel("Energy ($|t|$)", fontsize=12)
-    axes[1].set_title(f"Effective Model ($J_{{eff}}$={J_eff:.3f})", fontsize=12)
-    axes[1].grid(True, alpha=0.3)
+        # Plot full system
+        k_axis = torch.arange(eig_full.shape[0], dtype=torch.float64)
+        for i in range(eig_full.shape[1]):
+            axes[0].plot(k_axis.numpy(), eig_full[:, i].cpu().numpy(), 'b-', alpha=0.6)
 
-    plt.tight_layout()
-    plt.savefig("kagome_f_effective_array_comparison.png", dpi=150)
-    print("\nPlot saved to kagome_f_effective_array_comparison.png")
+        axes[0].set_xlabel("k-path index", fontsize=12)
+        axes[0].set_ylabel("Energy ($|t|$)", fontsize=12)
+        axes[0].set_title("Full Kagome-F System", fontsize=12)
+        axes[0].grid(True, alpha=0.3)
 
-    # Comparison plot using built-in method
-    fig, ax = plt.subplots(figsize=(10, 6))
-    optimizer.plot_comparison(ax=ax)
-    plt.savefig("kagome_f_effective_array_bands.png", dpi=150)
-    print("Band comparison saved to kagome_f_effective_array_bands.png")
+        # Plot effective model
+        for i in range(eig_eff.shape[1]):
+            axes[1].plot(k_axis.numpy(), eig_eff[:, i].cpu().numpy(), 'r-', alpha=0.8)
 
-    # Perturbation theory estimate
-    print("\n" + "=" * 70)
-    print("Perturbation Theory Estimate")
-    print("=" * 70)
+        axes[1].set_xlabel("k-path index", fontsize=12)
+        axes[1].set_ylabel("Energy ($|t|$)", fontsize=12)
+        axes[1].set_title(f"Effective Model ($J_{{eff}}$={J_eff:.3f})", fontsize=12)
+        axes[1].grid(True, alpha=0.3)
 
-    J_pert, S_pert = optimizer.perturbation_theory(epsilon_f, t_f)
-    print(f"  J_eff (perturbation theory) = {J_pert:.6f}")
-    print(f"  S_eff (perturbation theory) = {S_pert.tolist()}")
-    print(f"  J_eff (optimized) = {J_eff:.6f}")
-    print(f"  S_eff (optimized) = {S_eff.tolist()}")
+        plt.tight_layout()
+        plt.savefig("kagome_f_effective_array_comparison.png", dpi=150)
+        print("\nPlot saved to kagome_f_effective_array_comparison.png")
 
-    print("\n" + "=" * 70)
-    print("Example complete!")
-    print("=" * 70)
+        # Comparison plot using built-in method
+        fig, ax = plt.subplots(figsize=(10, 6))
+        optimizer.plot_comparison(ax=ax)
+        plt.savefig("kagome_f_effective_array_bands.png", dpi=150)
+        print("Band comparison saved to kagome_f_effective_array_bands.png")
+
+        # Perturbation theory estimate
+        print("\n" + "=" * 70)
+        print("Perturbation Theory Estimate")
+        print("=" * 70)
+
+        J_pert, S_pert = optimizer.perturbation_theory(epsilon_f, t_f)
+        print(f"  J_eff (perturbation theory) = {J_pert:.6f}")
+        print(f"  S_eff (perturbation theory) = {S_pert.tolist()}")
+        print(f"  J_eff (optimized) = {J_eff:.6f}")
+        print(f"  S_eff (optimized) = {S_eff.tolist()}")
+
+        print("\n" + "=" * 70)
+        print("Example complete!")
+        print("=" * 70)
 
 
 if __name__ == "__main__":
