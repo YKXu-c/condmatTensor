@@ -99,13 +99,20 @@ class EffectiveArrayOptimizer:
         self.loss_history = []
 
     def _detect_f_orbitals(self) -> List[int]:
-        """Detect f-orbital indices from orbital names.
+        """Detect f-orbital indices using metadata (new) or string matching (fallback).
 
         For spinful systems, detects both f_up and f_down orbitals.
 
         Returns:
             List of orbital indices identified as f-orbitals
         """
+        # Try metadata first
+        if self.H_full.orbital_metadatas is not None:
+            f_indices = self.H_full.get_f_orbitals()
+            if f_indices:
+                return f_indices
+
+        # Fallback to string matching (backward compatibility)
         if self.H_full.orbital_names is None:
             # Fallback: assume last 2 orbitals are f-up and f-down (if spinful)
             N_orb = self.H_full.shape[-1]
@@ -135,16 +142,21 @@ class EffectiveArrayOptimizer:
         return f_indices if f_indices else [self.H_full.shape[-1] - 1]
 
     def _is_already_spinful(self, H: "BaseTensor") -> bool:
-        """Detect if Hamiltonian is already spinful.
+        """Detect if Hamiltonian is spinful using metadata or fallback.
 
-        Checks:
-        1. Even number of orbitals
-        2. Orbital names contain '_up'/'_down' suffix
-        3. If lattice provided: num_orbitals entries are even
+        Checks (in priority order):
+        1. Metadata: all orbitals have spin information
+        2. Orbital names: contain '_up'/'_down' suffix
+        3. Lattice: num_orbitals entries are even
 
         Returns:
             True if Hamiltonian is already spinful, False otherwise
         """
+        # Try metadata first
+        if H.orbital_metadatas is not None:
+            return H.is_spinful_system()
+
+        # Fallback to string detection (backward compatibility)
         N_orb = H.shape[-1]
         if N_orb % 2 != 0:
             return False

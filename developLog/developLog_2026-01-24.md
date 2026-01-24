@@ -157,3 +157,78 @@ All marked as "not started" in the plan - no files exist, which is **consistent*
 
 *Date: 2026-01-24*
 *Branch: unity*
+
+---
+
+## Orbital Metadata Extension Implementation (2026-01-24)
+
+### Summary
+
+Extended `BaseTensor` API to support structured orbital metadata as an alternative to simple string-based `orbital_names`. This enables richer orbital characterization for many-body physics (DMFT, heavy fermion systems) while maintaining full backward compatibility.
+
+### Files Modified/Created
+
+| File | Action | Lines |
+|------|--------|-------|
+| `src/condmatTensor/core/types.py` | NEW | ~162 |
+| `src/condmatTensor/core/base.py` | MODIFY | +100 |
+| `src/condmatTensor/core/__init__.py` | MODIFY | +2 |
+| `src/condmatTensor/lattice/model.py` | MODIFY | +50 |
+| `src/condmatTensor/manybody/magnetic.py` | MODIFY | +30 |
+| `src/condmatTensor/optimization/magnetic.py` | MODIFY | +20 |
+| `examples/orbital_metadata_demo.py` | NEW | ~250 |
+| `developLog/allAPI.md` | UPDATE | +50 |
+
+### Key Features Implemented
+
+1. **OrbitalMetadata class** (`core/types.py`)
+   - Dataclass with structured fields: site, orb, spin, local, U, name
+   - String format support: `"Ce1-f-spin_up-local-U7.0"`
+   - Dictionary format support
+   - Helper methods: `is_f_orbital()`, `is_spinful()`, `is_localized()`
+
+2. **BaseTensor extensions** (`core/base.py`)
+   - `orbital_metadatas` parameter in `__init__`
+   - Priority: `orbital_metadatas` > `orbital_names`
+   - Lazy generation of metadata from `orbital_names`
+   - Helper query methods:
+     - `get_f_orbitals()`
+     - `get_orbitals_by_site(site)`
+     - `get_spinful_orbitals()`
+     - `is_spinful_system()`
+     - `get_localized_orbitals()`
+   - Metadata preserved through `to_k_space()` and `to()`
+
+3. **TightBindingModel integration** (`lattice/model.py`)
+   - `orbital_metadatas` parameter support
+   - `_normalize_metadatas()` method
+   - Metadata passed to BaseTensor in `build_HR()` and `build_Hk()`
+
+4. **Many-Body module updates** (`manybody/magnetic.py`)
+   - `build_spinful_hamiltonian()` preserves metadata
+   - Spin metadata added when converting spinless to spinful
+
+5. **Optimization module updates** (`optimization/magnetic.py`)
+   - `_detect_f_orbitals()` uses metadata first, fallback to string matching
+   - `_is_already_spinful()` uses metadata first, fallback to string detection
+
+### Backward Compatibility
+
+All existing code continues to work without modification:
+- Code using only `orbital_names` is unaffected
+- Metadata is lazily generated from `orbital_names` when accessed
+- String-based fallback methods preserved
+
+### Validation
+
+Created comprehensive demo script: `examples/orbital_metadata_demo.py`
+
+Demonstrates:
+1. String format usage
+2. Dictionary format usage
+3. OrbitalMetadata object usage
+4. Backward compatibility
+5. Metadata preservation through transformations
+6. Helper query methods
+7. Kagome lattice with metadata
+8. String parsing for various formats

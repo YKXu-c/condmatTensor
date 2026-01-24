@@ -1,6 +1,6 @@
 """BaseTensor class: unified tensor representation for physics objects."""
 
-from typing import Optional, List
+from typing import Optional, List, Union, Dict, Any
 import torch
 
 
@@ -15,6 +15,7 @@ class BaseTensor:
         tensor: Underlying PyTorch tensor data
         labels: Semantic labels for each dimension (e.g., ['k', 'orb_i', 'orb_j'])
         orbital_names: Physical names of orbitals (e.g., ['px', 'py', 'pz'])
+        orbital_metadatas: Structured orbital metadata (OrbitalMetadata list)
         displacements: Real-space displacements for H(R) tensors, shape (N_R, dim)
     """
 
@@ -23,6 +24,7 @@ class BaseTensor:
         tensor: torch.Tensor,
         labels: List[str],
         orbital_names: Optional[List[str]] = None,
+        orbital_metadatas: Optional[List["OrbitalMetadataLike"]] = None,
         displacements: Optional[torch.Tensor] = None,
     ) -> None:
         """
@@ -32,6 +34,11 @@ class BaseTensor:
             tensor: Underlying tensor data
             labels: Semantic labels for each dimension
             orbital_names: Physical names of orbitals (e.g., ['px', 'py'])
+            orbital_metadatas: Structured orbital metadata. Can be:
+                - List of OrbitalMetadata objects
+                - List of dictionaries with metadata fields
+                - List of strings (will be parsed)
+                If provided, takes precedence over orbital_names.
             displacements: Real-space displacements for H(R) tensors, shape (N_R, dim)
         """
         if len(labels) != tensor.ndim:
@@ -41,8 +48,18 @@ class BaseTensor:
 
         self.tensor = tensor
         self.labels = labels
-        self.orbital_names = orbital_names
         self.displacements = displacements
+
+        # Handle orbital_metadatas (takes precedence over orbital_names)
+        if orbital_metadatas is not None:
+            self._orbital_metadatas = self._normalize_metadatas(orbital_metadatas)
+            self.orbital_names = [md.to_string() for md in self._orbital_metadatas]
+        elif orbital_names is not None:
+            self.orbital_names = orbital_names
+            self._orbital_metadatas = None
+        else:
+            self.orbital_names = None
+            self._orbital_metadatas = None
 
     def to_k_space(self, k: torch.Tensor) -> "BaseTensor":
         """
@@ -105,6 +122,7 @@ class BaseTensor:
             tensor=fourier_tensor,
             labels=new_labels,
             orbital_names=self.orbital_names,
+            orbital_metadatas=self._orbital_metadatas,
             displacements=None,  # k-space tensors don't have displacements
         )
 
@@ -116,6 +134,7 @@ class BaseTensor:
             tensor=new_tensor,
             labels=self.labels,
             orbital_names=self.orbital_names,
+            orbital_metadatas=self._orbital_metadatas,
             displacements=new_displacements,
         )
 
@@ -136,3 +155,131 @@ class BaseTensor:
 
     def __repr__(self) -> str:
         return f"BaseTensor(shape={self.shape}, labels={self.labels}, dtype={self.dtype})"
+
+    def _normalize_metadatas(
+        self, metadatas: List["OrbitalMetadataLike"]
+    ) -> List["OrbitalMetadata"]:
+        """Normalize orbital metadata inputs to OrbitalMetadata objects.
+
+        Args:
+            metadatas: List of OrbitalMetadata, dict, or string
+
+        Returns:
+            List of OrbitalMetadata objects
+        """
+        from .types import OrbitalMetadata
+
+        normalized = []
+        for md in metadatas:
+            if isinstance(md, OrbitalMetadata):
+                normalized.append(md)
+            elif isinstance(md, dict):
+                normalized.append(OrbitalMetadata.from_dict(md))
+            elif isinstance(md, str):
+                normalized.append(OrbitalMetadata.from_string(md))
+            else:
+                raise TypeError(
+                    f"orbital_metadatas must be list of OrbitalMetadata, dict, or str, "
+                    f"got {type(md)}"
+                )
+        return normalized
+
+    @property
+    def orbital_metadatas(self) -> Optional[List["OrbitalMetadata"]]:
+        """Return orbital metadata list.
+
+        Lazily generates from orbital_names if not explicitly set.
+
+        Returns:
+            List of OrbitalMetadata objects, or None if orbital_names is None
+        """
+        if self._orbital_metadatas is not None:
+            return self._orbital_metadatas
+
+        # Lazy generation from orbital_names
+        if self.orbital_names is not None:
+            from .types import OrbitalMetadata
+            self._orbital_metadatas = [
+                OrbitalMetadata.from_string(name) for name in self.orbital_names
+            ]
+            return self._orbital_metadatas
+
+        return None
+
+    def get_f_orbitals(self) -> List[int]:
+        """Get indices of f-orbitals.
+
+        Returns:
+            List of orbital indices identified as f-orbitals
+
+        Examples:
+            >>> H = BaseTensor(...)
+            >>> f_indices = H.get_f_orbitals()
+            >>> print(f"F-orbitals at: {f_indices}")
+        """
+        if self.orbital_metadatas is None:
+            return []
+        return [i for i, md in enumerate(self.orbital_metadatas) if md.is_f_orbital()]
+
+    def get_orbitals_by_site(self, site: str) -> List[int]:
+        """Get indices of orbitals at a specific site.
+
+        Args:
+            site: Site identifier (e.g., 'Ce1', 'atom1')
+
+        Returns:
+            List of orbital indices at this site
+
+        Examples:
+            >>> H = BaseTensor(...)
+            >>> ce_orbitals = H.get_orbitals_by_site('Ce1')
+        """
+        if self.orbital_metadatas is None:
+            return []
+        return [i for i, md in enumerate(self.orbital_metadatas) if md.site == site]
+
+    def get_spinful_orbitals(self) -> List[int]:
+        """Get indices of spinful orbitals.
+
+        Returns:
+            List of orbital indices that have spin information
+
+        Examples:
+            >>> H = BaseTensor(...)
+            >>> spinful_indices = H.get_spinful_orbitals()
+        """
+        if self.orbital_metadatas is None:
+            return []
+        return [i for i, md in enumerate(self.orbital_metadatas) if md.is_spinful()]
+
+    def is_spinful_system(self) -> bool:
+        """Check if system is spinful.
+
+        A system is considered spinful if all orbitals have spin information.
+
+        Returns:
+            True if the system is spinful, False otherwise
+
+        Examples:
+            >>> H = BaseTensor(...)
+            >>> if H.is_spinful_system():
+            ...     print("System has spin")
+        """
+        metadatas = self.orbital_metadatas
+        if metadatas is None or len(metadatas) == 0:
+            return False
+        return all(md.is_spinful() for md in metadatas)
+
+    def get_localized_orbitals(self) -> List[int]:
+        """Get indices of localized orbitals.
+
+        Returns:
+            List of orbital indices identified as localized
+
+        Examples:
+            >>> H = BaseTensor(...)
+            >>> local_indices = H.get_localized_orbitals()
+        """
+        if self.orbital_metadatas is None:
+            return []
+        return [i for i, md in enumerate(self.orbital_metadatas) if md.is_localized()]

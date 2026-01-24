@@ -26,6 +26,7 @@ class TightBindingModel:
         self,
         lattice: "BravaisLattice",
         orbital_labels: Optional[List[str]] = None,
+        orbital_metadatas: Optional[List["OrbitalMetadataLike"]] = None,
         hoppings: Optional[List[Tuple]] = None,
     ) -> None:
         """
@@ -35,18 +36,30 @@ class TightBindingModel:
             lattice: BravaisLattice object
             orbital_labels: List of orbital names (e.g., ['A', 'B', 'C'] for Kagome)
                           If None, uses default ['orb_0', 'orb_1', ...]
+            orbital_metadatas: Structured orbital metadata. Can be:
+                - List of OrbitalMetadata objects
+                - List of dictionaries with metadata fields
+                - List of strings (will be parsed)
+                If provided, takes precedence over orbital_labels.
             hoppings: List of hopping tuples (orb_i, orb_j, displacement, value)
         """
         self.lattice = lattice
-        if orbital_labels is None:
-            self.orbital_labels = [f"orb_{i}" for i in range(lattice.total_orbitals)]
-        else:
+
+        # Handle orbital_metadatas (takes precedence over orbital_labels)
+        if orbital_metadatas is not None:
+            self._orbital_metadatas = self._normalize_metadatas(orbital_metadatas)
+            self.orbital_labels = [md.to_string() for md in self._orbital_metadatas]
+        elif orbital_labels is not None:
             if len(orbital_labels) != lattice.total_orbitals:
                 raise ValueError(
                     f"Number of orbital labels ({len(orbital_labels)}) must match "
                     f"total orbitals ({lattice.total_orbitals})"
                 )
             self.orbital_labels = orbital_labels
+            self._orbital_metadatas = None
+        else:
+            self.orbital_labels = [f"orb_{i}" for i in range(lattice.total_orbitals)]
+            self._orbital_metadatas = None
 
         # Create label to index mapping
         self._label_to_idx = {label: i for i, label in enumerate(self.orbital_labels)}
@@ -100,6 +113,34 @@ class TightBindingModel:
             conj_value = torch.conj(value) if isinstance(value, torch.Tensor) else value
             self.hoppings.append((orb_j_idx, orb_i_idx, -displacement, conj_value))
 
+    def _normalize_metadatas(
+        self, metadatas: List["OrbitalMetadataLike"]
+    ) -> List["OrbitalMetadata"]:
+        """Normalize orbital metadata inputs to OrbitalMetadata objects.
+
+        Args:
+            metadatas: List of OrbitalMetadata, dict, or string
+
+        Returns:
+            List of OrbitalMetadata objects
+        """
+        from condmatTensor.core.types import OrbitalMetadata
+
+        normalized = []
+        for md in metadatas:
+            if isinstance(md, OrbitalMetadata):
+                normalized.append(md)
+            elif isinstance(md, dict):
+                normalized.append(OrbitalMetadata.from_dict(md))
+            elif isinstance(md, str):
+                normalized.append(OrbitalMetadata.from_string(md))
+            else:
+                raise TypeError(
+                    f"orbital_metadatas must be list of OrbitalMetadata, dict, or str, "
+                    f"got {type(md)}"
+                )
+        return normalized
+
     def build_HR(self) -> "BaseTensor":
         """
         Build real-space Hamiltonian H(R) from hopping terms.
@@ -137,6 +178,7 @@ class TightBindingModel:
             tensor=H_R,
             labels=["R", "orb_i", "orb_j"],
             orbital_names=self.orbital_labels,
+            orbital_metadatas=self._orbital_metadatas,
             displacements=disp_cart,
         )
 
@@ -179,6 +221,7 @@ class TightBindingModel:
             tensor=Hk,
             labels=["k", "orb_i", "orb_j"],
             orbital_names=self.orbital_labels,
+            orbital_metadatas=self._orbital_metadatas,
             displacements=None,  # k-space has no displacements
         )
 
@@ -213,6 +256,7 @@ class TightBindingModel:
         new_model = type(self)(
             lattice=new_lattice,
             orbital_labels=self.orbital_labels.copy(),
+            orbital_metadatas=self._orbital_metadatas,
             hoppings=new_hoppings,
         )
 
