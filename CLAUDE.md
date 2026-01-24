@@ -1,4 +1,6 @@
-# CLAUDE.md - condmatTensor Development Guide
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 > **Comprehensive guide for Claude Code instances working on the condmatTensor repository.**
 > For detailed architecture reference, see [`plans/architecture_plan.md`](plans/architecture_plan.md) and [`plans/DEPENDENCY_ANALYSIS.md`](plans/DEPENDENCY_ANALYSIS.md).
@@ -114,6 +116,11 @@ pip install -r requirements.txt
 ### Running Examples (Validation)
 This project uses **example scripts for validation**, NOT pytest.
 
+**Note**: Ensure `PYTHONPATH` is set before running examples:
+```bash
+export PYTHONPATH=$(pwd)/src:$PYTHONPATH
+```
+
 ```bash
 # Basic Kagome tight-binding (validates: flat band at E=-2|t|, Dirac points at K)
 python examples/kagome_bandstructure.py
@@ -139,7 +146,12 @@ source env_condmatTensor/bin/activate
 # Install PyTorch FIRST, then requirements
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
 pip install -r requirements.txt
+
+# Add package to PYTHONPATH (required for imports)
+export PYTHONPATH=$(pwd)/src:$PYTHONPATH
 ```
+
+**Note**: The virtual environment `env_condmatTensor` is used during development and is excluded from git.
 
 ---
 
@@ -236,6 +248,18 @@ from condmatTensor.optimization import (
 
 ## GPU Device Management
 
+**This is a scientific calculation package. NOT everything runs on GPU.**
+
+### CPU vs GPU Split
+
+| **GPU (Compute-Intensive)** | **CPU (Control Logic & I/O)** |
+|---------------------------|------------------------------|
+| Bayesian optimization (LEVEL 7) | DMFT loop control (LEVEL 4) |
+| Large matrix diagonalization (LEVEL 3) | Plotting with matplotlib |
+| Dense tensor operations (all levels) | File I/O (all levels) |
+| Lorentzian broadening (LEVEL 5) | Loop overhead (all levels) |
+| QGT computations with autograd (LEVEL 5) | Result storage (all levels) |
+
 ```python
 from condmatTensor.core import get_device
 
@@ -247,6 +271,10 @@ Hk = Hk.to(device)
 model = model.to(device)
 
 # Minimize CPU-GPU transfers (transfer once, compute on GPU, transfer back once)
+
+# Pattern: For plotting, always bring back to CPU first
+import matplotlib.pyplot as plt
+plt.plot(evals.cpu().numpy())  # .cpu() or .numpy() required for matplotlib
 ```
 
 ---
@@ -311,6 +339,12 @@ The `examples/` directory demonstrates and validates core physics:
 3. **Modular architecture** - Enables progressive implementation
 4. **Strong GPU support** - PyTorch native acceleration
 5. **Research-focused** - Designed for quantum materials research, not web/applications
+6. **No circular dependencies** - Lower levels never depend on higher levels
+7. **PYTHONPATH required** - Set environment variable: `export PYTHONPATH=/path/to/condmatTensor/src:$PYTHONPATH`
+8. **Development logging** - All development work must be logged in `developLog/` directory:
+   - `developLog/allAPI.md` - Complete API documentation (update when API changes)
+   - `developLog/developLog_YYYY-MM-DD.md` - Daily development logs
+   - See `plans/architecture_plan.md` Rule 5 and `.cursorrules` Rule 8 for details
 
 ---
 
