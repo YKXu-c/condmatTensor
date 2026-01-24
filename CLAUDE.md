@@ -116,10 +116,7 @@ pip install -r requirements.txt
 ### Running Examples (Validation)
 This project uses **example scripts for validation**, NOT pytest.
 
-**Note**: Ensure `PYTHONPATH` is set before running examples:
-```bash
-export PYTHONPATH=$(pwd)/src:$PYTHONPATH
-```
+**Note**: Ensure run in env_condmatTensor
 
 ```bash
 # Basic Kagome tight-binding (validates: flat band at E=-2|t|, Dirac points at K)
@@ -147,8 +144,6 @@ source env_condmatTensor/bin/activate
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
 pip install -r requirements.txt
 
-# Add package to PYTHONPATH (required for imports)
-export PYTHONPATH=$(pwd)/src:$PYTHONPATH
 ```
 
 **Note**: The virtual environment `env_condmatTensor` is used during development and is excluded from git.
@@ -340,7 +335,7 @@ The `examples/` directory demonstrates and validates core physics:
 4. **Strong GPU support** - PyTorch native acceleration
 5. **Research-focused** - Designed for quantum materials research, not web/applications
 6. **No circular dependencies** - Lower levels never depend on higher levels
-7. **PYTHONPATH required** - Set environment variable: `export PYTHONPATH=/path/to/condmatTensor/src:$PYTHONPATH`
+7. **venv required** - in env_condmatTensor
 8. **Development logging** - All development work must be logged in `developLog/` directory:
    - `developLog/allAPI.md` - Complete API documentation (update when API changes)
    - `developLog/developLog_YYYY-MM-DD.md` - Daily development logs
