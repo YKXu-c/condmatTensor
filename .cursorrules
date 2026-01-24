@@ -1,0 +1,751 @@
+# condmatTensor - Cursor AI Editor Rules
+
+> **AI Assistant Guidelines for condmatTensor Development**
+
+This file contains rules for AI assistants (Cursor, Copilot, Claude) working on the condmatTensor codebase.
+
+## Project Overview
+
+condmatTensor is a PyTorch-based condensed matter physics library for quantum materials research. The library uses a **unified tensor-first approach** where all physics objects (Hamiltonians, Green's functions, self-energies) are represented by a single `BaseTensor` class with semantic labels.
+
+- **Package Version**: 0.0.1
+- **Implementation Status**: ~45% complete (5 of 10 levels partially/fully implemented)
+- **Key Innovation**: One `BaseTensor` class for H, G, Σ with automatic R→k Fourier transforms
+
+---
+
+## 10-Level Architecture (Mental Model)
+
+```
+LEVEL 1: Core      → BaseTensor, get_device() ✅
+LEVEL 2: Lattice   → BravaisLattice, TightBindingModel ✅
+LEVEL 3: Solvers   → diagonalize() (ED, IPT not implemented) ⚠️
+LEVEL 4: Many-Body → BareGreensFunction, SelfEnergy (DMFT loops not implemented) ⚠️
+LEVEL 5: Analysis  → DOSCalculator, BandStructure (topology, QGT not implemented) ⚠️
+LEVEL 6: Transport → ❌ Not started
+LEVEL 7: Optimize  → BayesianOptimizer (ML interface not implemented) ⚠️
+LEVEL 8: Interface → ❌ Not started
+LEVEL 9: Logging   → ❌ Not started
+LEVEL 10: Symmetry → ❌ Not started
+```
+
+**NO CIRCULAR DEPENDENCIES**: Lower levels never depend on higher levels.
+
+---
+
+## Critical Conventions
+
+### 1. Spinor Convention for Magnetic Systems
+
+**Spin is embedded in orbital indices**: `[orb_0_up, orb_0_down, orb_1_up, orb_1_down, ...]`
+
+```python
+# 3 orbital sites × 2 spins = 6 orbitals
+num_orbitals = [2, 2, 2]  # Each site has 2 spin states
+
+# Example: Kagome with f-orbital and spin
+# [A_up, A_down, B_up, B_down, C_up, C_down, f_up, f_down]
+num_orbitals = [2, 2, 2, 2]  # 4 sites × 2 spins = 8 orbitals
+```
+
+### 2. BaseTensor - Unified Representation
+
+All physics objects use semantic labels:
+
+```python
+from condmatTensor.core import BaseTensor
+
+# Hamiltonian in real space
+HR = BaseTensor(tensor, labels=['R', 'orb_i', 'orb_j'], displacements=...)
+
+# Hamiltonian in k-space (auto Fourier transform)
+Hk = HR.to_k_space(k_points)  # Returns BaseTensor with labels=['k', 'orb_i', 'orb_j']
+
+# Green's function, self-energy also use BaseTensor
+G = BaseTensor(tensor, labels=['k', 'orb_i', 'orb_j', 'iwn'])
+```
+
+### 3. Fourier Transform Formula
+
+```
+H(k) = Σ_R H(R) · exp(i·k·R)
+```
+
+- `R`: Real-space displacement vector (Cartesian coordinates)
+- `k`: Momentum vector
+- Labels change: `['R', 'orb_i', 'orb_j']` → `['k', 'orb_i', 'orb_j']`
+
+### 4. Coordinate Conventions
+
+| Aspect | Convention |
+|--------|------------|
+| **User input** | Fractional (units of lattice vectors) |
+| **Internal storage** | Cartesian |
+| `cell_vectors` | Cartesian |
+| `displacements` in `add_hopping()` | Fractional |
+| `reciprocal_vectors()` | Cartesian |
+
+### 5. Energy Units
+
+All energies are **dimensionless** in units of hopping parameter `|t|`. Default: `t = -1.0`.
+
+- Kagome eigenvalues: -2|t| to +4|t|
+- Flat band at E = -2|t|
+
+### 6. GPU Device Management
+
+```python
+from condmatTensor.core import get_device
+
+# Auto-detect CUDA with CPU fallback (default)
+device = get_device()  # Returns 'cpu' by default
+
+# Force GPU usage
+device = get_device("cuda")
+
+# Move tensors/models to GPU
+Hk = Hk.to(device)
+model = model.to(device)
+
+# Minimize CPU-GPU transfers (transfer once, compute on GPU, transfer back once)
+```
+
+---
+
+## Import Patterns
+
+### LEVEL 1: Core
+```python
+from condmatTensor.core import BaseTensor, get_device
+```
+
+### LEVEL 2: Lattice
+```python
+from condmatTensor.lattice import (
+    BravaisLattice,
+    TightBindingModel,
+    generate_kmesh,
+    generate_k_path
+)
+```
+
+### LEVEL 3: Solvers
+```python
+from condmatTensor.solvers import diagonalize
+```
+
+### LEVEL 4: Many-Body
+```python
+from condmatTensor.manybody.preprocessing import (
+    generate_matsubara_frequencies,
+    BareGreensFunction,
+    SelfEnergy,
+    SpectralFunction
+)
+from condmatTensor.manybody.magnetic import (
+    KondoLatticeSolver,
+    SpinFermionModel
+)
+```
+
+### LEVEL 5: Analysis
+```python
+from condmatTensor.analysis import (
+    DOSCalculator,
+    ProjectedDOS,
+    BandStructure
+)
+```
+
+### LEVEL 7: Optimization
+```python
+from condmatTensor.optimization import (
+    BayesianOptimizer,
+    EffectiveArrayOptimizer
+)
+```
+
+---
+
+## Common Workflows
+
+### Band Structure Calculation
+```python
+from condmatTensor.lattice import BravaisLattice, TightBindingModel, generate_k_path
+from condmatTensor.solvers import diagonalize
+from condmatTensor.analysis import BandStructure
+
+lattice = BravaisLattice(cell_vectors, basis_positions, num_orbitals)
+model = TightBindingModel(lattice, orbital_labels=['A', 'B', 'C'])
+model.add_hopping('A', 'B', [0, 0], 1.0)
+
+k_path, labels = generate_k_path(lattice, ['G', 'K', 'M', 'G'], n_k=100)
+Hk = model.build_Hk(k_path)
+evals, evecs = diagonalize(Hk.tensor)
+
+bs = BandStructure()
+bs.compute(evals, k_path, labels)
+bs.plot()
+```
+
+### Many-Body Green's Function
+```python
+from condmatTensor.manybody.preprocessing import (
+    generate_matsubara_frequencies,
+    BareGreensFunction,
+    SelfEnergy
+)
+
+omega = generate_matsubara_frequencies(beta=10.0, n_max=128)
+G0 = BareGreensFunction.from_hamiltonian(Hk, omega, mu=0.0)
+Sigma = SelfEnergy(omega, 0.0)
+# ... DMFT loop updates Sigma ...
+G = G0.apply_self_energy(Sigma)
+```
+
+### Bayesian Optimization
+```python
+from condmatTensor.optimization import BayesianOptimizer
+
+opt = BayesianOptimizer(bounds=[(0, 1), (0, 1)], backend="auto")
+X_best, y_best = opt.optimize(objective_fn, n_init=10, n_iter=50, device=device)
+```
+
+---
+
+## Bayesian Optimization Backend Priority
+
+`BayesianOptimizer` supports multiple backends with automatic fallback:
+
+| Priority | Backend | Package | Description |
+|----------|---------|---------|-------------|
+| **1 (Preferred)** | SOBER | `sober-bo==2.0.4` | Sequential Optimization using Ensemble of Regressors |
+| **2** | BoTorch | `botorch>=0.9.0` | Gaussian Process with Expected Improvement |
+| **3 (Fallback)** | Simple | Python stdlib | Thompson sampling / random search |
+
+---
+
+## Development Rules
+
+### Rule 1: Virtual Environment Setup (REQUIRED)
+
+All development MUST be done under a dedicated virtual environment:
+
+```bash
+# Create virtual environment
+python -m venv env_condmatTensor
+
+# Activate (Linux/Mac)
+source env_condmatTensor/bin/activate
+
+# Activate (Windows)
+env_condmatTensor\Scripts\activate
+
+# CRITICAL: Install PyTorch FIRST via CUDA-specific URL
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
+
+# Then install remaining dependencies
+pip install -r requirements.txt
+```
+
+**Why this order?** PyTorch 2.10+cu13 from PyPI may give CPU-only version. Use official PyTorch URL for CUDA support.
+
+### Rule 2: Test-After-Module with Kagome Examples
+
+After completing each module (LEVEL), run Kagome examples to verify correctness:
+
+```python
+# After finishing a module, test with:
+from condmatTensor.lattice import BravaisLattice, generate_kmesh, generate_k_path
+from condmatTensor.core import BaseTensor
+from condmatTensor.analysis import DOSCalculator, BandStructure
+from condmatTensor.solvers import diagonalize
+import torch
+
+# Build Kagome lattice
+lattice, Hr = build_kagome_lattice()
+
+# 1. Test along k-path
+k_path = generate_k_path(lattice, ['G', 'K', 'M', 'G'], 100)
+Hk_path = Hr.to_k_space(k_path)
+E_path, U_path = diagonalize(Hk_path)
+
+# 2. Test on k-mesh
+k_mesh = generate_kmesh(lattice, 50)
+Hk_mesh = Hr.to_k_space(k_mesh)
+E_mesh = diagonalize(Hk_mesh)[0]
+
+# Plot results
+bs = BandStructure()
+bs.compute(E_path, k_path)
+bs.plot(labels=['G', 'K', 'M', 'G'])
+
+dos = DOSCalculator()
+dos.from_eigenvalues(E_mesh, torch.linspace(-4, 4, 500), eta=0.05)
+dos.plot()
+
+# Verify: Analytic Kagome flat band at ε = -2t
+# Verify: DOS divergence at Van Hove singularities
+```
+
+**Required Plots After Each Module:**
+- Band structure along high-symmetry k-path
+- DOS with analytic comparison where available
+- Any new observable added by the module
+
+### Rule 3: No Circular Dependencies
+- Lower levels (1-3) never depend on higher levels (4-10)
+- Each level can only depend on levels with smaller numbers
+
+### Rule 4: Use BaseTensor for All Physics Objects
+- Hamiltonians: `labels=['k', 'orb_i', 'orb_j']` or `['R', 'orb_i', 'orb_j']`
+- Green's functions: `labels=['k', 'orb_i', 'orb_j', 'iwn']`
+- Self-energies: `labels=['iwn']` (pure imaginary)
+
+### Rule 5: CPU/GPU Split for Scientific Computing
+
+**IMPORTANT**: This is a scientific calculation package. NOT everything runs on GPU.
+
+#### GPU (Compute-Intensive Operations)
+Use GPU for these heavy tensor operations:
+
+| Operation | Module | Reason |
+|-----------|--------|--------|
+| Bayesian optimization | LEVEL 7 | Parallel candidate evaluation, ensemble methods |
+| CNN/self-attention impurity solver | LEVEL 4 (future) | Neural network forward/backward passes |
+| Bayesian self-energy generation | LEVEL 4 | Fast sampling, large parameter sweeps |
+| Large matrix diagonalization | LEVEL 3 | Eigendecomposition of large Hamiltonians |
+| QGT computations (autograd) | LEVEL 5 | Gradient computation, parallel k-points |
+| Dense tensor operations | All | Matrix multiplication, Fourier transforms |
+| Lorentzian broadening (DOS) | LEVEL 5 | Vectorized operations on large k-meshes |
+
+#### CPU (Control Logic & I/O)
+Keep these on CPU:
+
+| Operation | Module | Reason |
+|-----------|--------|--------|
+| DMFT loop control | LEVEL 4 | Iteration logic, convergence checking |
+| Plotting | LEVEL 5 | matplotlib requires CPU (`.cpu()` or `.numpy()`) |
+| File I/O | All | PyYAML, HDF5, text output |
+| Loop overhead | All | Conditionals, small data operations |
+| Result storage | All | Database, JSON, logging |
+| Parameter sweeps (control) | LEVEL 7 | Loop over parameter ranges |
+
+#### CPU-GPU Communication Design Principles
+
+**Before building each module, discuss and document:**
+
+1. **What data flows to GPU?** Large tensors only
+2. **What stays on CPU?** Control logic, parameters
+3. **When to transfer?** Minimize back-and-forth
+4. **How to verify?** Check memory usage, timing benchmarks
+5. **User control?** Allow manual device selection per epoch
+
+#### User-Controlled Device Selection
+
+**Design pattern: Allow users to specify device per epoch/iteration**
+
+```python
+# Pattern: Optional device parameter per method call
+def dmft_loop(Hk, omega, solver, max_iter=100, tol=1e-6,
+              device_per_iter=None, verbose=False):
+    """
+    Args:
+        device_per_iter: Optional callable or list mapping iteration -> device
+            - None: Auto-detect once, use for all iterations (default)
+            - "cpu": Force CPU for all iterations
+            - "cuda": Force GPU for all iterations
+            - callable: Function called each iteration: device = device_per_iter(iter)
+            - list: Pre-specified devices per iteration: ["cpu", "cuda", "cpu", ...]
+        verbose: Print device selection each iteration
+
+    Returns:
+        Sigma: Self-energy (always on CPU at end for plotting/analysis)
+    """
+    # Default: Auto-detect once
+    default_device = get_device()
+
+    for i in range(max_iter):
+        # User-controlled device selection per iteration
+        if device_per_iter is None:
+            device = default_device
+        elif device_per_iter == "cpu":
+            device = torch.device("cpu")
+        elif device_per_iter == "cuda":
+            device = torch.device("cuda")
+        elif callable(device_per_iter):
+            device = device_per_iter(i)
+        elif isinstance(device_per_iter, list):
+            device = device_per_iter[i] if i < len(device_per_iter) else default_device
+        else:
+            device = default_device
+
+        if verbose:
+            print(f"Iteration {i}: Using device = {device}")
+
+        # Transfer tensors to selected device
+        Hk_curr = Hk.to(device)
+        Sigma_curr = Sigma.to(device)
+        omega_curr = omega.to(device)
+
+        # Compute on selected device
+        G_k = compute_greens_function(Hk_curr, Sigma_curr, omega_curr)
+        G_loc = torch.mean(G_k, dim=0).cpu()  # Always bring to CPU for control logic
+
+        # CPU: Convergence check
+        if check_convergence(G_loc, Sigma.cpu(), tol):
+            break
+
+        Sigma = update_sigma(G_loc)
+
+    return Sigma  # CPU: final result
+```
+
+**Usage examples:**
+
+```python
+# 1. Auto-detect once, use for all (default)
+Sigma = dmft_loop(Hk, omega, solver)
+
+# 2. Force CPU for all iterations (debugging)
+Sigma = dmft_loop(Hk, omega, solver, device_per_iter="cpu")
+
+# 3. Force GPU for all (production)
+Sigma = dmft_loop(Hk, omega, solver, device_per_iter="cuda")
+
+# 4. Alternate CPU/GPU (testing)
+Sigma = dmft_loop(Hk, omega, solver, device_per_iter=["cpu", "cuda"] * 50)
+
+# 5. GPU for expensive iterations, CPU for cheap ones
+def adaptive_device(iter):
+    if iter < 10:  # Warm-up on CPU
+        return torch.device("cpu")
+    else:  # Heavy iterations on GPU
+        return torch.device("cuda")
+
+Sigma = dmft_loop(Hk, omega, solver, device_per_iter=adaptive_device, verbose=True)
+# Output:
+# Iteration 0: Using device = cpu
+# Iteration 1: Using device = cpu
+# ...
+# Iteration 10: Using device = cuda
+
+# 6. Handle OOM by switching to CPU
+def safe_device(iter, prev_oom=False):
+    if prev_oom or iter % 10 == 0:  # Every 10th iter on CPU (memory check)
+        return torch.device("cpu")
+    return torch.device("cuda")
+
+try:
+    Sigma = dmft_loop(Hk, omega, solver, device_per_iter=safe_device)
+except RuntimeError as e:
+    if "out of memory" in str(e):
+        print("OOM! Switching to CPU-only mode...")
+        Sigma = dmft_loop(Hk, omega, solver, device_per_iter="cpu")
+```
+
+**Apply this pattern to all modules:**
+
+| Module | Method | Device Parameter |
+|--------|--------|-----------------|
+| `diagonalize` | `diagonalize(Hk, device=None)` | Per-call device selection |
+| `DMFTLoop` | `run(device_per_iter=None)` | Per-iteration device |
+| `BayesianOptimizer` | `optimize(objective_fn, device="auto")` | Per-batch device |
+| `DOSCalculator` | `from_eigenvalues(E_k, device=None)` | Per-computation device |
+| `BandStructure` | `compute(evals, device=None)` | Per-computation device |
+
+```python
+# Solvers module example
+def diagonalize(Hk, hermitian=True, device=None):
+    """
+    Args:
+        Hk: Hamiltonian in k-space, shape (N_k, N_orb, N_orb)
+        device: Device for computation (None = use Hk.device)
+    """
+    if device is not None:
+        Hk = Hk.to(device)
+
+    if hermitian:
+        return torch.linalg.eigh(Hk.tensor)
+    else:
+        return torch.linalg.eig(Hk.tensor)
+
+# Usage: User controls device per call
+evals_cpu, evecs_cpu = diagonalize(Hk, device=torch.device("cpu"))
+evals_gpu, evecs_gpu = diagonalize(Hk, device=torch.device("cuda"))
+```
+
+```python
+# GOOD: Batched GPU computation with CPU control
+device = get_device("cuda")
+
+# DMFT Loop: CPU controls, GPU computes
+for iteration in range(max_iter):  # CPU: loop control
+    # Transfer large tensors to GPU once per iteration
+    Hk_gpu = Hk.to(device)
+    Sigma_gpu = Sigma.to(device)
+    omega_gpu = omega.to(device)
+
+    # GPU: Computationally expensive operations
+    G_k = batched_greens_function(Hk_gpu, Sigma_gpu, omega_gpu)  # GPU
+    G_loc = torch.mean(G_k, dim=0)  # GPU: reduction
+
+    # Transfer back to CPU for control logic
+    G_loc_cpu = G_loc.cpu()  # Single transfer
+
+    # CPU: Convergence check (small data)
+    if check_convergence(G_loc_cpu, G_loc_prev, tol):
+        break
+
+    G_loc_prev = G_loc_cpu
+
+# CPU: Plotting results
+import matplotlib.pyplot as plt
+plt.plot(omega_cpu, G_loc_cpu.numpy())
+
+# BAD: Everything on GPU (wastes memory, complicates plotting)
+Hk = Hk.cuda()
+Sigma = Sigma.cuda()
+omega = omega.cuda()
+# ... loop ...
+# Now need .cpu() for matplotlib anyway - inefficient!
+```
+
+#### Best Practices by Module Type
+
+**Bayesian Optimization (LEVEL 7):**
+```python
+# CPU: Optimization loop control
+opt = BayesianOptimizer(bounds=[(0, 1), (0, 1)])
+
+for iter in range(n_iter):  # CPU: loop
+    # GPU: Batch evaluation of candidates
+    candidates = opt.suggest(n_candidates=100)  # CPU: small array
+    Hk_batch = build_hamiltonians_batch(candidates)  # CPU
+
+    # Transfer batch to GPU for evaluation
+    Hk_batch_gpu = Hk_batch.to(device)
+    scores = evaluate_objective_batch(Hk_batch_gpu)  # GPU: parallel
+
+    # Transfer results back (small data)
+    scores_cpu = scores.cpu()  # Single transfer
+
+    # CPU: Update surrogate model
+    opt.update(candidates, scores_cpu)
+```
+
+**CNN/Attention Impurity Solver (LEVEL 4, future):**
+```python
+# GPU: Neural network operations
+class CNN_ImpuritySolver:
+    def __init__(self):
+        self.model = CNNModel().to(device)  # GPU
+
+    def solve(self, H_bath):  # H_bath: (N_batch, N_orb, N_orb)
+        # Transfer bath Hamiltonian to GPU
+        H_bath_gpu = H_bath.to(device)
+
+        # GPU: CNN forward pass (parallel over batch)
+        G_imp = self.model(H_bath_gpu)  # GPU
+
+        # Transfer result to CPU for DMFT loop
+        return G_imp.cpu()  # Single transfer
+```
+
+**DMFT Loop (LEVEL 4):**
+```python
+# Pattern: CPU controls, GPU computes heavy ops
+def dmft_loop(Hk, omega, solver, max_iter=100, tol=1e-6):
+    device = get_device("cuda")
+
+    # CPU: Initialize
+    Sigma = initialize_sigma(omega)  # CPU: small tensor
+
+    for i in range(max_iter):  # CPU: loop control
+        # GPU: Compute Green's function (expensive)
+        Hk_gpu = Hk.to(device)
+        Sigma_gpu = Sigma.to(device)
+        omega_gpu = omega.to(device)
+
+        G_k = compute_greens_function(Hk_gpu, Sigma_gpu, omega_gpu)  # GPU
+        G_loc = torch.mean(G_k, dim=0).cpu()  # GPU reduction + CPU transfer
+
+        # CPU: Weiss field (small tensor ops)
+        G0_inv = compute_weiss_field(G_loc, Sigma)  # CPU: small
+
+        # GPU: Solve impurity (expensive)
+        G_imp = solver.solve(G0_inv)  # May use GPU internally
+
+        # CPU: Update self-energy (small tensor ops)
+        Sigma_new = compute_self_energy(G0_inv, G_imp)  # CPU
+
+        # CPU: Convergence check
+        if torch.max(torch.abs(Sigma_new - Sigma)) < tol:
+            break
+
+        Sigma = Sigma_new
+
+    return Sigma  # CPU: result for plotting/analysis
+```
+
+#### Communication Overhead Monitoring
+
+**Always profile CPU-GPU transfers:**
+```python
+import time
+
+# Time GPU computation
+start = time.time()
+with torch.no_grad():
+    result_gpu = heavy_computation(Hk.to(device))
+gpu_time = time.time() - start
+
+# Time transfer
+start = time.time()
+result_cpu = result_gpu.cpu()
+transfer_time = time.time() - start
+
+print(f"GPU compute: {gpu_time:.4f}s, Transfer: {transfer_time:.4f}s")
+# If transfer > 10% of compute, reconsider design
+```
+
+#### References for GPU Scientific Computing
+
+Before implementing GPU-accelerated modules, consult:
+
+1. **PyTorch GPU best practices**: https://pytorch.org/docs/stable/notes/cuda.html
+2. **TensorFlow GPU strategies**: For batching/pipelining patterns
+3. **CuPy documentation**: For NumPy-compatible GPU operations
+4. **DMFT GPU papers**: Recent literature on GPU-accelerated DMFT
+5. **Bayesian optimization on GPU**: SOBER, BoTorch GPU support
+
+**Key principle:** Design for **minimal, batched transfers** - move large data to GPU once, compute everything possible, transfer back once.
+
+### Rule 6: Many-Body Algorithm Reference Discussion
+
+For any many-body algorithm implementation, discuss and verify against literature BEFORE coding:
+
+**Required Pre-Coding Checklist:**
+1. [ ] Find primary reference paper (preferably < 5 years old for verification)
+2. [ ] Identify benchmark test cases (where available)
+3. [ ] Extract formalism and equations
+4. [ ] Discuss implementation approach
+5. [ ] Create test case with known analytic result
+6. [ ] Implement and verify against benchmark
+7. [ ] Document in code comments with citation
+
+**Algorithms Requiring Discussion:**
+- DMFT self-consistency loop
+- IPT (Iterated Perturbation Theory) solver
+- QGT computation (both autograd and analytic methods)
+- Chern number / Z₂ invariant calculation
+- RGF (Recursive Green's Function) transport
+- ED (Exact Diagonalization) with CNN-selected CI
+
+**Example Documentation Format:**
+```python
+def ipt_self_energy(G: BaseTensor, U: float, beta: float) -> BaseTensor:
+    """Compute IPT self-energy Σ(iωₙ).
+
+    Algorithm: Second-order iterated perturbation theory
+    Reference: Merino & Parcollet, Phys. Rev. B 104, 035160 (2021)
+    Equation: Σ(iω) = U² · χ₀(iω) · G(iω)
+
+    Implementation verified against:
+    - Single-impurity Anderson model (SIAM) analytic solution
+    - DMFT convergence for Hubbard model at half-filling
+
+    Args:
+        G: Local Green's function, labels=['iwn']
+        U: Hubbard interaction strength
+        beta: Inverse temperature
+
+    Returns:
+        Σ: Self-energy, labels=['iwn'] (pure imaginary)
+    """
+```
+
+### Rule 7: Import Order
+Always import from lower levels first:
+```python
+# GOOD: Lower levels first
+from condmatTensor.core import BaseTensor
+from condmatTensor.lattice import BravaisLattice
+from condmatTensor.solvers import diagonalize
+from condmatTensor.analysis import BandStructure
+
+# BAD: Higher levels before lower
+from condmatTensor.analysis import BandStructure  # LEVEL 5
+from condmatTensor.core import BaseTensor         # LEVEL 1
+```
+
+---
+
+## Validation Examples
+
+This project uses **example scripts for validation**, NOT pytest:
+
+```bash
+# Basic Kagome tight-binding (validates: flat band at E=-2|t|, Dirac points at K)
+python examples/kagome_bandstructure.py
+
+# Kagome-F multi-orbital physics
+python examples/kagome_with_f_bandstructure.py
+
+# Spinful systems with Zeeman coupling
+python examples/kagome_spinful_bandstructure.py
+
+# Bayesian optimization for effective model downfolding
+python examples/kagome_f_effective_array.py
+
+# GPU performance benchmark
+python examples/gpu_performance_benchmark.py
+```
+
+---
+
+## Key Physics Validation Points
+
+### Kagome Lattice
+- **Flat band**: Expected at E = -2|t|
+- **Dirac points**: Expected at K points in Brillouin zone
+- **Band range**: -2|t| to +4|t|
+
+### Kagome-F (4 sites/cell)
+- **Total bands**: 8 (4 sites × 2 spin)
+- **f-d hybridization**: Expected between f and d orbitals
+- **Effective model**: Bayesian downfolding to 6 bands
+
+---
+
+## Documentation Files
+
+| File | Purpose |
+|------|---------|
+| `CLAUDE.md` | Claude Code development guide |
+| `plans/architecture_plan.md` | Comprehensive architecture reference |
+| `plans/DEPENDENCY_ANALYSIS.md` | Comparison with NumPy/TRIQS/WannierTools |
+
+---
+
+## Installation Order
+
+**PyTorch MUST be installed FIRST**:
+
+```bash
+# Step 1: Install PyTorch 2.10+ with CUDA 13.0 support FIRST
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
+
+# Step 2: Install remaining dependencies
+pip install -r requirements.txt
+```
+
+---
+
+## Key Design Principles
+
+1. **Tensor-First**: All physics data in `BaseTensor`
+2. **Unified Interface**: H, G, Σ all use same class
+3. **GPU-Ready**: Automatic chunking and device management
+4. **Clear Dependencies**: Explicit level hierarchy
+5. **Layered Architecture**: No circular imports
