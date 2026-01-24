@@ -1,7 +1,7 @@
 # CLAUDE.md - condmatTensor Development Guide
 
 > **Comprehensive guide for Claude Code instances working on the condmatTensor repository.**
-> For detailed architecture reference, see [`@plans/architecture_plan.md`](@plans/architecture_plan.md) and [`@plans/DEPENDENCY_ANALYSIS.md`](@plans/DEPENDENCY_ANALYSIS.md).
+> For detailed architecture reference, see [`plans/architecture_plan.md`](plans/architecture_plan.md) and [`plans/DEPENDENCY_ANALYSIS.md`](plans/DEPENDENCY_ANALYSIS.md).
 
 ---
 
@@ -295,8 +295,10 @@ The `examples/` directory demonstrates and validates core physics:
 
 | File | Description |
 |------|-------------|
-| [`@plans/architecture_plan.md`](@plans/architecture_plan.md) | Comprehensive architecture reference (505 lines): module details, formalism, equations, workflows |
-| [`@plans/DEPENDENCY_ANALYSIS.md`](@plans/DEPENDENCY_ANALYSIS.md) | Comparison with NumPy/TRIQS/WannierTools (848 lines) |
+| [`plans/architecture_plan.md`](plans/architecture_plan.md) | Comprehensive architecture reference (2,604 lines): module details, formalism, equations, workflows, dependencies |
+| [`plans/DEPENDENCY_ANALYSIS.md`](plans/DEPENDENCY_ANALYSIS.md) | Comparison with NumPy/TRIQS/WannierTools (847 lines) |
+| [`.cursorrules`](.cursorrules) | AI assistant rules for Cursor/Claude Code (751 lines): CPU/GPU split, device selection, development rules |
+| [`.github/copilot-instructions.md`](.github/copilot-instructions.md) | GitHub Copilot instructions (365 lines) |
 | [`requirements.txt`](requirements.txt) | Python dependencies |
 | [`.gitignore`](.gitignore) | Excludes: `CLAUDE.md`, `plans/`, `env_condmatTensor/`, `.claude/settings.json` |
 

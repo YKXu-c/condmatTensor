@@ -167,44 +167,465 @@ src/condmatTensor/
          └───────────────────┘
 ```
 
-### Import Path Dependency Table
+---
 
-| Module | Status | Internal Dependencies | External Dependencies |
-|--------|--------|----------------------|----------------------|
-| **core/base.py** | ✅ | None | torch |
-| **core/math.py** | ❌ | None | torch, numpy, scipy |
-| **core/gpu_utils.py** | ❌ | None | torch |
-| **logging/** | ❌ | None | - |
-| **lattice/model.py** | ✅ | core | torch, numpy |
-| **lattice/bzone.py** | ✅ | core | torch, numpy |
-| **lattice/symmetry.py** | ❌ | core, lattice | torch, numpy, scipy |
-| **interface/** | ❌ | core, lattice | torch, numpy, pyyaml |
-| **solvers.diag** | ✅ | core, lattice | torch, numpy, scipy |
-| **solvers.ed_cnn** | ❌ | manybody.ed | torch, numpy |
-| **manybody.preprocessing** | ✅ | core, lattice | torch, numpy |
-| **manybody.magnetic** | ✅ | core, lattice, manybody.preprocessing | torch, numpy |
-| **manybody.dmft** | ❌ | core, lattice, manybody.ipt | torch, numpy |
-| **manybody.cdmft** | ❌ | core, lattice, manybody (ipt, ed) | torch, numpy |
-| **manybody.ipt** | ❌ | core | torch, numpy, scipy |
-| **manybody.ed** | ❌ | core | torch, numpy |
-| **analysis.dos** | ✅ | core, lattice, solvers.diag | torch, numpy, matplotlib |
-| **analysis.bandstr** | ✅ | core, lattice, solvers.diag | torch, numpy, matplotlib |
-| **analysis.fermi** | ❌ | core, lattice, solvers.diag | torch, numpy, matplotlib |
-| **analysis.qgt** | ❌ | core, core.math | torch, numpy |
-| **analysis.topology** | ❌ | analysis.qgt | torch, numpy, matplotlib |
-| **transport.rgf** | ❌ | core, lattice | torch, numpy, scipy |
-| **transport.transport** | ❌ | transport.rgf | torch, numpy, matplotlib |
-| **optimization.bayesian** | ✅ | manybody | torch, numpy, botorch/scikit-optimize |
-| **optimization.magnetic** | ✅ | manybody | torch, numpy, botorch/scikit-optimize |
-| **optimization.ml_interface** | ❌ | manybody | torch, numpy |
+## Module Dependencies (Detailed)
 
-**Legend**:
+This section provides detailed dependency information for each level, including what can be imported independently and the specific internal/external dependencies.
+
+### LEVEL 1: Core (No Internal Dependencies)
+
+**Files**: `core/base.py`, `core/math.py` (not implemented), `core/gpu_utils.py` (not implemented)
+
+**Internal Dependencies**: None
+
+**External Dependencies**: `torch`
+
+**Can Import Independently**: ✅ Yes
+
+**Key Classes**:
+- `BaseTensor` - Unified tensor representation with semantic labels
+- `get_device()` - Auto-detect CUDA/CPU/MPS device
+
+**Usage**:
+```python
+from condmatTensor.core import BaseTensor, get_device
+```
+
+---
+
+### LEVEL 2: Lattice (Depends on LEVEL 1)
+
+**Files**: `lattice/model.py`, `lattice/bzone.py`
+
+**Internal Dependencies**: `core` (BaseTensor, get_device)
+
+**External Dependencies**: `torch`, `numpy`
+
+**Can Import Independently**: ✅ Yes (after core)
+
+**Key Classes**:
+- `BravaisLattice` - Bravais lattice with multiple sites per unit cell
+- `TightBindingModel` - General tight-binding model builder
+- `generate_kmesh()` - Generate uniform k-mesh in fractional coordinates
+- `generate_k_path()` - Generate k-path along high-symmetry lines
+
+**Usage**:
+```python
+from condmatTensor.lattice import (
+    BravaisLattice,
+    TightBindingModel,
+    generate_kmesh,
+    generate_k_path
+)
+```
+
+---
+
+### LEVEL 3: Solvers (Depends on LEVEL 1, LEVEL 2)
+
+**Files**: `solvers/diag.py`, `solvers/ipt.py` (not implemented), `solvers/ed.py` (not implemented), `solvers/ed_cnn.py` (not implemented)
+
+**Internal Dependencies**: `core`, `lattice`
+
+**External Dependencies**: `torch`, `numpy`, `scipy`
+
+**Can Import Independently**: ✅ Yes (after core, lattice)
+
+**Key Functions**:
+- `diagonalize()` - Diagonalize Hamiltonian at each k-point (ED, IPT not implemented)
+
+**Usage**:
+```python
+from condmatTensor.solvers import diagonalize
+evals, evecs = diagonalize(Hk.tensor)
+```
+
+---
+
+### LEVEL 4: Many-Body (Depends on LEVEL 1, LEVEL 2, LEVEL 3)
+
+**Files**: `manybody/preprocessing.py`, `manybody/magnetic.py`, `manybody/dmft.py` (not implemented), `manybody/cdmft.py` (not implemented), `manybody/ipt.py` (not implemented), `manybody/ed.py` (not implemented)
+
+**Internal Dependencies**: `core`, `lattice`, `solvers`, `manybody.preprocessing` (for magnetic.py)
+
+**External Dependencies**: `torch`, `numpy`
+
+**Can Import Independently**: ✅ Yes (after core, lattice, solvers)
+
+**Key Classes**:
+- `BareGreensFunction` - Non-interacting Green's function from Hamiltonian
+- `SelfEnergy` - Self-energy container class
+- `SpectralFunction` - Spectral function from Green's function
+- `KondoLatticeSolver` - Kondo lattice model solver
+- `SpinFermionModel` - Spin-fermion model
+
+**Usage**:
+```python
+from condmatTensor.manybody.preprocessing import (
+    generate_matsubara_frequencies,
+    BareGreensFunction,
+    SelfEnergy,
+    SpectralFunction
+)
+from condmatTensor.manybody.magnetic import (
+    KondoLatticeSolver,
+    SpinFermionModel
+)
+```
+
+---
+
+### LEVEL 5: Analysis (Depends on LEVEL 1, LEVEL 2, LEVEL 3)
+
+**Files**: `analysis/dos.py`, `analysis/bandstr.py`, `analysis/fermi.py` (not implemented), `analysis/qgt.py` (not implemented), `analysis/topology.py` (not implemented)
+
+**Internal Dependencies**: `core`, `lattice`, `solvers.diag`, `analysis.qgt` (for topology)
+
+**External Dependencies**: `torch`, `numpy`, `matplotlib`
+
+**Can Import Independently**: ✅ Yes (after core, lattice, solvers)
+
+**Key Classes**:
+- `DOSCalculator` - Density of States calculator with Lorentzian broadening
+- `ProjectedDOS` - Projected DOS extending DOSCalculator
+- `BandStructure` - Band structure calculator and plotting
+
+**Usage**:
+```python
+from condmatTensor.analysis import (
+    DOSCalculator,
+    ProjectedDOS,
+    BandStructure
+)
+```
+
+---
+
+### LEVEL 6: Transport (Depends on LEVEL 1, LEVEL 2)
+
+**Files**: `transport/rgf.py` (not implemented), `transport/transport.py` (not implemented)
+
+**Internal Dependencies**: `core`, `lattice`
+
+**External Dependencies**: `torch`, `numpy`, `scipy`
+
+**Can Import Independently**: ✅ Yes (after core, lattice)
+
+**Status**: ❌ Not started
+
+---
+
+### LEVEL 7: Optimization (Depends on LEVEL 4)
+
+**Files**: `optimization/bayesian.py`, `optimization/magnetic.py`, `optimization/ml_interface.py` (not implemented)
+
+**Internal Dependencies**: `manybody`
+
+**External Dependencies**: `torch`, `numpy`, `botorch`/`scikit-optimize`/`sober-bo`
+
+**Can Import Independently**: ✅ Yes (after manybody)
+
+**Key Classes**:
+- `BayesianOptimizer` - Bayesian optimization with multiple backends
+- `MultiObjectiveOptimizer` - Multi-objective optimization
+- `EffectiveArrayOptimizer` - Effective array downfolding optimizer
+
+**Usage**:
+```python
+from condmatTensor.optimization import (
+    BayesianOptimizer,
+    MultiObjectiveOptimizer,
+    EffectiveArrayOptimizer
+)
+```
+
+---
+
+### LEVEL 8: Interface (Depends on LEVEL 1, LEVEL 2)
+
+**Files**: `interface/yaml_reader.py` (not implemented), `interface/wannier_reader.py` (not implemented)
+
+**Internal Dependencies**: `core`, `lattice`
+
+**External Dependencies**: `torch`, `numpy`, `pyyaml`
+
+**Can Import Independently**: ✅ Yes (after core, lattice)
+
+**Status**: ❌ Not started
+
+---
+
+### LEVEL 9: Logging (No Internal Dependencies)
+
+**Files**: `logging/__init__.py` (not implemented)
+
+**Internal Dependencies**: None
+
+**External Dependencies**: None
+
+**Can Import Independently**: ✅ Yes
+
+**Status**: ❌ Not started
+
+---
+
+### LEVEL 10: Symmetry (Depends on LEVEL 1, LEVEL 2)
+
+**Files**: `lattice/symmetry.py` (not implemented)
+
+**Internal Dependencies**: `core`, `lattice`
+
+**External Dependencies**: `torch`, `numpy`, `scipy` (2D self-implemented, 3D via spglib)
+
+**Can Import Independently**: ✅ Yes (after core, lattice)
+
+**Status**: ❌ Not started
+
+---
+
+## Import Chains for Common Workflows
+
+This section shows actual import chains for common scientific workflows, demonstrating the dependency hierarchy in practice.
+
+### Band Structure Calculation
+
+```python
+# LEVEL 1: Core
+from condmatTensor.core import BaseTensor
+
+# LEVEL 2: Lattice (uses LEVEL 1)
+from condmatTensor.lattice import BravaisLattice, generate_k_path
+
+# LEVEL 3: Solvers (uses LEVEL 1, 2)
+from condmatTensor.solvers import diagonalize
+
+# LEVEL 5: Analysis (uses LEVEL 1, 2, 3)
+from condmatTensor.analysis import BandStructure
+```
+
+**Dependency Chain**: Core → Lattice → Solvers → Analysis
+
+---
+
+### DMFT Calculation
+
+```python
+# LEVEL 1: Core
+from condmatTensor.core import BaseTensor
+
+# LEVEL 2: Lattice (uses LEVEL 1)
+from condmatTensor.lattice import BravaisLattice, generate_kmesh
+
+# LEVEL 3: Solvers (uses LEVEL 1, 2)
+from condmatTensor.solvers import diagonalize
+
+# LEVEL 4: Many-Body preprocessing (uses LEVEL 1, 2)
+from condmatTensor.manybody.preprocessing import (
+    generate_matsubara_frequencies,
+    BareGreensFunction,
+    SelfEnergy
+)
+
+# LEVEL 4: Many-Body magnetic (uses LEVEL 1, 2, 3, preprocessing)
+from condmatTensor.manybody.magnetic import (
+    KondoLatticeSolver,
+    SpinFermionModel
+)
+```
+
+**Dependency Chain**: Core → Lattice → Solvers → Many-Body (preprocessing → magnetic)
+
+---
+
+### Bayesian Optimization
+
+```python
+# LEVEL 4: Many-Body (required for optimization target)
+from condmatTensor.manybody.preprocessing import BareGreensFunction
+from condmatTensor.manybody.magnetic import KondoLatticeSolver
+
+# LEVEL 7: Optimization (uses LEVEL 4)
+from condmatTensor.optimization import BayesianOptimizer
+```
+
+**Dependency Chain**: Core → Lattice → Solvers → Many-Body → Optimization
+
+---
+
+### Quantum Geometric Tensor & Topology
+
+```python
+# LEVEL 1: Core
+from condmatTensor.core import BaseTensor
+
+# LEVEL 2: Lattice
+from condmatTensor.lattice import BravaisLattice, generate_kmesh
+
+# LEVEL 3: Solvers
+from condmatTensor.solvers import diagonalize
+
+# LEVEL 5: Analysis - QGT (uses LEVEL 1)
+from condmatTensor.analysis.qgt import hk_to_g_layer, compute_qgt
+
+# LEVEL 5: Analysis - Topology (uses LEVEL 5 - QGT)
+from condmatTensor.analysis.topology import chern_number, berry_curvature, ahe
+```
+
+**Dependency Chain**: Core → Lattice → Solvers → Analysis (QGT → Topology)
+
+---
+
+### Transport Calculations
+
+```python
+# LEVEL 1: Core
+from condmatTensor.core import BaseTensor
+
+# LEVEL 2: Lattice
+from condmatTensor.lattice import BravaisLattice
+
+# LEVEL 6: Transport (uses LEVEL 1, 2)
+from condmatTensor.transport import RGF, Transport, stacking_rgf
+```
+
+**Dependency Chain**: Core → Lattice → Transport
+
+---
+
+## Circular Dependency Policy
+
+**✅ NO CIRCULAR DEPENDENCIES** - The 10-level architecture ensures unidirectional dependencies:
+
+### Core Policy Statement
+
+- Lower levels (1-3) **never** depend on higher levels (4-10)
+- Each level can **only** depend on levels with smaller numbers
+- This is enforced by import order and module structure
+- If a circular dependency is discovered, it must be resolved by refactoring
+
+### Dependency Flow Diagram
+
+```
+LEVEL 1 (core) ──────────────────────────────────────┐
+    ↓                                                │
+LEVEL 2 (lattice) ──────┐                            │
+    ↓                    │                            │
+LEVEL 3 (solvers) ← LEVEL 8 (interface)              │
+    ↓                    ↓                            │
+LEVEL 4 (manybody) ←─────┘                            │
+    ↓                                                 │
+LEVEL 5 (analysis) ←─────────────────────────────────┤
+    ↓                                                 │
+LEVEL 7 (optimization) ←──────────────────────────────┘
+    ↓
+LEVEL 6 (transport) ← LEVEL 2 (lattice) ──────────────┘
+```
+
+### Example Valid Dependencies
+
+| Module | Depends On | Valid? | Reason |
+|--------|-----------|--------|--------|
+| `lattice` | `core` | ✅ | LEVEL 2 depends on LEVEL 1 |
+| `solvers` | `core`, `lattice` | ✅ | LEVEL 3 depends on LEVEL 1, 2 |
+| `manybody` | `core`, `lattice`, `solvers` | ✅ | LEVEL 4 depends on LEVEL 1, 2, 3 |
+| `analysis` | `core`, `lattice`, `solvers` | ✅ | LEVEL 5 depends on LEVEL 1, 2, 3 |
+| `optimization` | `manybody` | ✅ | LEVEL 7 depends on LEVEL 4 |
+| `transport` | `core`, `lattice` | ✅ | LEVEL 6 depends on LEVEL 1, 2 |
+| `interface` | `core`, `lattice` | ✅ | LEVEL 8 depends on LEVEL 1, 2 |
+
+### Example Invalid Dependencies (Would Be Circular)
+
+| Invalid Dependency | Why Invalid? |
+|-------------------|--------------|
+| `core` depends on `lattice` | LEVEL 1 cannot depend on LEVEL 2 |
+| `lattice` depends on `solvers` | LEVEL 2 cannot depend on LEVEL 3 |
+| `solvers` depends on `manybody` | LEVEL 3 cannot depend on LEVEL 4 |
+| `manybody` depends on `optimization` | LEVEL 4 cannot depend on LEVEL 7 |
+| `analysis` depends on `optimization` | Would create circular dep |
+
+### How to Resolve Circular Dependencies
+
+If a circular dependency is discovered:
+
+1. **Extract common code** to a lower level (create new module in LEVEL 1 or 2)
+2. **Use dependency injection** (pass objects as parameters instead of importing)
+3. **Split the module** into separate levels
+4. **Use callbacks/events** (register functions instead of direct imports)
+
+### Complete Import Dependency Matrix
+
+| Level | Module Path | Status | Internal Dependencies | External Dependencies | Can Import Independently? |
+|-------|-------------|--------|----------------------|----------------------|--------------------------|
+| **1** | `condmatTensor.core.base` | ✅ | None | `torch` | ✅ Yes |
+| **1** | `condmatTensor.core.device` | ✅ | None | `torch` | ✅ Yes |
+| **1** | `condmatTensor.core.math` | ❌ | None | `torch`, `numpy`, `scipy` | ✅ Yes |
+| **1** | `condmatTensor.core.gpu_utils` | ❌ | None | `torch` | ✅ Yes |
+| **2** | `condmatTensor.lattice.model` | ✅ | `core.base`, `core.device` | `torch`, `numpy` | ✅ Yes (after core) |
+| **2** | `condmatTensor.lattice.bzone` | ✅ | `core.device` | `torch`, `numpy` | ✅ Yes (after core) |
+| **2** | `condmatTensor.lattice.symmetry` | ❌ | `core`, `lattice` | `torch`, `numpy`, `scipy` | ✅ Yes (after core, lattice) |
+| **3** | `condmatTensor.solvers.diag` | ✅ | `core.base`, `lattice.model` | `torch`, `numpy`, `scipy` | ✅ Yes (after core, lattice) |
+| **3** | `condmatTensor.solvers.ipt` | ❌ | `core` | `torch`, `numpy`, `scipy` | ✅ Yes (after core) |
+| **3** | `condmatTensor.solvers.ed` | ❌ | `core` | `torch`, `numpy` | ✅ Yes (after core) |
+| **3** | `condmatTensor.solvers.ed_cnn` | ❌ | `manybody.ed` | `torch`, `numpy` | ❌ No (needs manybody.ed) |
+| **4** | `condmatTensor.manybody.preprocessing` | ✅ | `core`, `lattice` | `torch`, `numpy` | ✅ Yes (after core, lattice) |
+| **4** | `condmatTensor.manybody.magnetic` | ✅ | `core`, `lattice`, `manybody.preprocessing` | `torch`, `numpy` | ✅ Yes (after core, lattice, preprocessing) |
+| **4** | `condmatTensor.manybody.dmft` | ❌ | `core`, `lattice`, `manybody.ipt` | `torch`, `numpy` | ❌ No (needs ipt) |
+| **4** | `condmatTensor.manybody.cdmft` | ❌ | `core`, `lattice`, `manybody.ipt`, `manybody.ed` | `torch`, `numpy` | ❌ No (needs ipt, ed) |
+| **4** | `condmatTensor.manybody.ipt` | ❌ | `core` | `torch`, `numpy`, `scipy` | ✅ Yes (after core) |
+| **4** | `condmatTensor.manybody.ed` | ❌ | `core` | `torch`, `numpy` | ✅ Yes (after core) |
+| **5** | `condmatTensor.analysis.dos` | ✅ | `core`, `lattice`, `solvers.diag` | `torch`, `numpy`, `matplotlib` | ✅ Yes (after core, lattice, solvers) |
+| **5** | `condmatTensor.analysis.bandstr` | ✅ | `core`, `lattice`, `solvers.diag` | `torch`, `numpy`, `matplotlib` | ✅ Yes (after core, lattice, solvers) |
+| **5** | `condmatTensor.analysis.fermi` | ❌ | `core`, `lattice`, `solvers.diag` | `torch`, `numpy`, `matplotlib` | ✅ Yes (after core, lattice, solvers) |
+| **5** | `condmatTensor.analysis.qgt` | ❌ | `core`, `core.math` | `torch`, `numpy` | ✅ Yes (after core) |
+| **5** | `condmatTensor.analysis.topology` | ❌ | `analysis.qgt` | `torch`, `numpy`, `matplotlib` | ❌ No (needs qgt) |
+| **6** | `condmatTensor.transport.rgf` | ❌ | `core`, `lattice` | `torch`, `numpy`, `scipy` | ✅ Yes (after core, lattice) |
+| **6** | `condmatTensor.transport.transport` | ❌ | `transport.rgf` | `torch`, `numpy`, `matplotlib` | ❌ No (needs rgf) |
+| **7** | `condmatTensor.optimization.bayesian` | ✅ | `manybody` | `torch`, `numpy`, `botorch`/`scikit-optimize` | ✅ Yes (after manybody) |
+| **7** | `condmatTensor.optimization.magnetic` | ✅ | `manybody` | `torch`, `numpy`, `botorch`/`scikit-optimize` | ✅ Yes (after manybody) |
+| **7** | `condmatTensor.optimization.ml_interface` | ❌ | `manybody` | `torch`, `numpy` | ✅ Yes (after manybody) |
+| **8** | `condmatTensor.interface.yaml_reader` | ❌ | `core`, `lattice` | `torch`, `numpy`, `pyyaml` | ✅ Yes (after core, lattice) |
+| **8** | `condmatTensor.interface.wannier_reader` | ❌ | `core`, `lattice` | `torch`, `numpy` | ✅ Yes (after core, lattice) |
+| **9** | `condmatTensor.logging` | ❌ | None | - | ✅ Yes |
+| **10** | `condmatTensor.lattice.symmetry` | ❌ | `core`, `lattice` | `torch`, `numpy`, `scipy`/`spglib` | ✅ Yes (after core, lattice) |
+
+**Legend:**
 - ✅ = Implemented
 - ❌ = Not Implemented
-- **Bold** modules can be imported independently
-- Import order must follow dependency levels (higher levels depend on lower levels)
-- No circular dependencies allowed
-- **LEVEL 10 (lattice/symmetry)** provides symmetry-reduced calculations for memory savings
+- **Level**: Module level in the 10-level hierarchy
+- **Can Import Independently?**: Whether the module can be imported after satisfying its internal dependencies
+
+**Import Order Examples:**
+
+```python
+# Minimum import for basic usage (LEVEL 1-2)
+from condmatTensor.core import BaseTensor, get_device
+from condmatTensor.lattice import BravaisLattice, TightBindingModel
+
+# Import for band structure (LEVEL 1-3, 5)
+from condmatTensor.core import BaseTensor
+from condmatTensor.lattice import BravaisLattice, generate_k_path
+from condmatTensor.solvers import diagonalize
+from condmatTensor.analysis import BandStructure
+
+# Import for DMFT (LEVEL 1-4)
+from condmatTensor.core import BaseTensor, get_device
+from condmatTensor.lattice import BravaisLattice, generate_kmesh
+from condmatTensor.manybody.preprocessing import (
+    generate_matsubara_frequencies, BareGreensFunction, SelfEnergy
+)
+from condmatTensor.manybody.magnetic import KondoLatticeSolver
+
+# Import for Bayesian optimization (LEVEL 1-4, 7)
+from condmatTensor.manybody import KondoLatticeSolver
+from condmatTensor.optimization import BayesianOptimizer
+```
+
+**Key Dependency Rules:**
+1. Import order must follow level numbers (lower levels first)
+2. **No circular dependencies** - higher levels never import from lower levels
+3. Module path format: `condmatTensor.<level>.<module>.<class/function>`
+4. Use `__init__.py` exports for cleaner imports (e.g., `from condmatTensor.core import BaseTensor` instead of `from condmatTensor.core.base import BaseTensor`)
 
 ### Unit System and Coordinate Conventions
 
