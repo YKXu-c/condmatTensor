@@ -31,7 +31,7 @@ import torch
 import matplotlib.pyplot as plt
 
 from condmatTensor.core import BaseTensor
-from condmatTensor.lattice import BravaisLattice, TightBindingModel, generate_k_path
+from condmatTensor.lattice import BravaisLattice, HoppingModel, generate_k_path
 from condmatTensor.solvers import diagonalize
 from condmatTensor.analysis import BandStructure, DOSCalculator
 from condmatTensor.manybody import LocalMagneticModel
@@ -69,7 +69,7 @@ def build_kagome_spinful_lattice(t: float = -1.0) -> BravaisLattice:
     )
 
 
-def build_kagome_spinful_hamiltonian(lattice: BravaisLattice, t: float = -1.0) -> TightBindingModel:
+def build_kagome_spinful_hamiltonian(lattice: BravaisLattice, t: float = -1.0) -> HoppingModel:
     """
     Build spinful tight-binding Hamiltonian for Kagome lattice.
 
@@ -82,7 +82,7 @@ def build_kagome_spinful_hamiltonian(lattice: BravaisLattice, t: float = -1.0) -
         t: Hopping parameter (default -1)
 
     Returns:
-        TightBindingModel with spinful orbitals (A_up, A_down, B_up, B_down, C_up, C_down)
+        HoppingModel with spinful orbitals (A_up, A_down, B_up, B_down, C_up, C_down)
     """
     # Spinful orbital labels: 3 sites × 2 spin = 6 orbitals
     orbital_labels = [
@@ -91,7 +91,7 @@ def build_kagome_spinful_hamiltonian(lattice: BravaisLattice, t: float = -1.0) -
         "C_up", "C_down",
     ]
 
-    tb_model = TightBindingModel(lattice, orbital_labels=orbital_labels)
+    tb_model = HoppingModel(lattice, orbital_labels=orbital_labels)
 
     # Nearest-neighbor hopping (spin-conserving)
     # Must match the spinless case in kagome_bandstructure.py
@@ -231,7 +231,7 @@ def main():
         basis_positions=basis_positions_spinless,
         num_orbitals=[1, 1, 1],  # Spinless: 1 orbital per site
     )
-    tb_spinless = TightBindingModel(lattice_spinless, orbital_labels=["A", "B", "C"])
+    tb_spinless = HoppingModel(lattice_spinless, orbital_labels=["A", "B", "C"])
 
     # Add hoppings (same as before but without spin)
     tb_spinless.add_hopping("A", "B", [0, 0], t)

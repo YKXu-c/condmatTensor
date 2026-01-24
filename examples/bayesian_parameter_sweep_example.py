@@ -34,7 +34,7 @@ import matplotlib.pyplot as plt
 from typing import Tuple, Dict, List
 
 from condmatTensor.core import BaseTensor
-from condmatTensor.lattice import BravaisLattice, TightBindingModel, generate_k_path
+from condmatTensor.lattice import BravaisLattice, HoppingModel, generate_k_path
 from condmatTensor.solvers import diagonalize
 from condmatTensor.optimization import BayesianOptimizer
 
@@ -67,7 +67,7 @@ def build_kagome_model(t: float) -> BaseTensor:
     # Ensure k_path has the same dtype as the lattice (float64)
     k_path = k_path.to(dtype=torch.float64)
 
-    tb_model = TightBindingModel(lattice)
+    tb_model = HoppingModel(lattice)
 
     # Nearest-neighbor hopping
     tb_model.add_hopping(0, 1, [0, 0], t, add_hermitian=False)

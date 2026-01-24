@@ -164,7 +164,7 @@ src/condmatTensor/
 │
 ├── lattice/
 │   ├── __init__.py
-│   ├── model.py (337 lines)            ✅ BravaisLattice, TightBindingModel
+│   ├── model.py (337 lines)            ✅ BravaisLattice, HoppingModel
 │   └── bzone.py (94 lines)             ✅ generate_kmesh, generate_k_path, k_frac_to_cart
 │
 ├── solvers/
@@ -222,7 +222,7 @@ condmatTensor
 │
 ├── Layer 2: Data Structures (+ core)
 │   └── lattice/
-│       ├── model.py        ✅ (BravaisLattice, TightBindingModel - 337 lines)
+│       ├── model.py        ✅ (BravaisLattice, HoppingModel - 337 lines)
 │       └── bzone.py        ✅ (generate_kmesh, generate_k_path, k_frac_to_cart - 94 lines)
 │
 ├── Layer 3: Solvers (+ core, lattice)
@@ -345,7 +345,7 @@ class BravaisLattice:
     def high_symmetry_points(self) -> dict[str, torch.Tensor]:
         """Return high-symmetry points (G, K, M for triangular)."""
 
-class TightBindingModel:
+class HoppingModel:
     """General tight-binding model builder with symbolic hopping terms.
 
     Attributes:

@@ -34,7 +34,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from condmatTensor.core import BaseTensor, get_device
-from condmatTensor.lattice import BravaisLattice, TightBindingModel, generate_k_path
+from condmatTensor.lattice import BravaisLattice, HoppingModel, generate_k_path
 from condmatTensor.solvers import diagonalize
 from condmatTensor.analysis import BandStructure, DOSCalculator
 from condmatTensor.optimization import EffectiveArrayOptimizer
@@ -121,7 +121,7 @@ def build_kagome_hamiltonian_spinless(
     Returns:
         BaseTensor with spinless Hamiltonian
     """
-    tb_model = TightBindingModel(lattice, orbital_labels=["A", "B", "C"])
+    tb_model = HoppingModel(lattice, orbital_labels=["A", "B", "C"])
 
     # Nearest-neighbor hopping (must match kagome_bandstructure.py)
     # A <-> B hopping
@@ -163,7 +163,7 @@ def build_kagome_f_hamiltonian_spinless(
         BaseTensor with spinless Hamiltonian
     """
     orbital_labels = ["A", "B", "C", "f"]
-    tb_model = TightBindingModel(lattice, orbital_labels=orbital_labels)
+    tb_model = HoppingModel(lattice, orbital_labels=orbital_labels)
 
     # Kagome-Kagome hopping
     tb_model.add_hopping("A", "B", [0, 0], t, add_hermitian=False)

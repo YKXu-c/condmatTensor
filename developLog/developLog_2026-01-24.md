@@ -34,11 +34,11 @@ Comprehensive comparison of **implemented modules** against **architectural plan
 | Component | Plan | Implementation | Status |
 |-----------|------|----------------|--------|
 | `BravaisLattice` | Required | ✅ Implemented (model.py:375 lines) | Consistent |
-| `TightBindingModel` | Required | ✅ Implemented (model.py) | Consistent |
+| `HoppingModel` | Required | ✅ Implemented (model.py) | Consistent |
 | `generate_kmesh()` | Required | ✅ Implemented (bzone.py:95 lines) | Consistent |
 | `generate_k_path()` | Required | ✅ Implemented (bzone.py) | Consistent |
 
-**Exports Match**: `__all__ = ["BravaisLattice", "TightBindingModel", "generate_kmesh", "generate_k_path"]` ✅
+**Exports Match**: `__all__ = ["BravaisLattice", "HoppingModel", "generate_kmesh", "generate_k_path"]` ✅
 
 ---
 

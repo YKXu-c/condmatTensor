@@ -16,8 +16,8 @@ A PyTorch-based condensed matter physics library with a unified `BaseTensor` cla
 - **LEVEL 1-3, partial LEVEL 4, LEVEL 5, and LEVEL 7**: ~3,580 lines implemented (excluding __init__.py)
 - Examples validate 3 methods of Hamiltonian construction agree to <1e-6:
   1. Direct k-space (analytic formula)
-  2. `TightBindingModel.build_Hk()` (direct from hopping)
-  3. `TightBindingModel.build_HR().to_k_space()` (real-space + Fourier)
+  2. `HoppingModel.build_Hk()` (direct from hopping)
+  3. `HoppingModel.build_HR().to_k_space()` (real-space + Fourier)
 
 ## Simplified Module Structure
 
@@ -32,8 +32,8 @@ src/condmatTensor/
 │   └── gpu_utils.py            # device selection, memory estimates, chunking [NOT IMPLEMENTED]
 │
 ├── lattice/                    [LEVEL 2: Data Structures - +LEVEL 1] ✅ IMPLEMENTED
-│   ├── __init__.py             # Exports: BravaisLattice, TightBindingModel, generate_kmesh, generate_k_path
-│   ├── model.py (337 lines)    # BravaisLattice class, TightBindingModel class
+│   ├── __init__.py             # Exports: BravaisLattice, HoppingModel, generate_kmesh, generate_k_path
+│   ├── model.py (337 lines)    # BravaisLattice class, HoppingModel class
 │   ├── bzone.py (94 lines)     # generate_kmesh(), generate_k_path(), k_frac_to_cart()
 │   └── symmetry.py             [LEVEL 10: Symmetry Reduction - +LEVEL 1, LEVEL 2] [NOT IMPLEMENTED]
 │
@@ -206,7 +206,7 @@ from condmatTensor.core import BaseTensor, get_device
 
 **Key Classes**:
 - `BravaisLattice` - Bravais lattice with multiple sites per unit cell
-- `TightBindingModel` - General tight-binding model builder
+- `HoppingModel` - General tight-binding model builder
 - `generate_kmesh()` - Generate uniform k-mesh in fractional coordinates
 - `generate_k_path()` - Generate k-path along high-symmetry lines
 
@@ -214,7 +214,7 @@ from condmatTensor.core import BaseTensor, get_device
 ```python
 from condmatTensor.lattice import (
     BravaisLattice,
-    TightBindingModel,
+    HoppingModel,
     generate_kmesh,
     generate_k_path
 )
@@ -600,7 +600,7 @@ If a circular dependency is discovered:
 ```python
 # Minimum import for basic usage (LEVEL 1-2)
 from condmatTensor.core import BaseTensor, get_device
-from condmatTensor.lattice import BravaisLattice, TightBindingModel
+from condmatTensor.lattice import BravaisLattice, HoppingModel
 
 # Import for band structure (LEVEL 1-3, 5)
 from condmatTensor.core import BaseTensor
@@ -631,7 +631,7 @@ from condmatTensor.optimization import BayesianOptimizer
 
 **Lattice Coordinates:**
 - **User Input**: Fractional coordinates (dimensionless, in units of lattice vectors)
-  - Example: `TightBindingModel.add_hopping("A", "B", [0, 0], 1.0)`
+  - Example: `HoppingModel.add_hopping("A", "B", [0, 0], 1.0)`
   - Displacements in fractional coordinates: `[0, 0]` = same unit cell, `[1, 0]` = next cell in x-direction
 - **Internal Storage**: Cartesian coordinates
   - `BaseTensor.displacements` stores displacements in Cartesian (physical units)
@@ -746,7 +746,7 @@ This section documents all implemented classes and their methods as of 2026-01-2
 
 ---
 
-#### `TightBindingModel` class (`model.py` - lines 7-182)
+#### `HoppingModel` class (`model.py` - lines 7-182)
 
 **Purpose**: General tight-binding model builder with symbolic hopping terms.
 

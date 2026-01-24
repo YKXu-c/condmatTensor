@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Orbital Metadata System Demonstration.
 
 This script demonstrates the new orbital metadata system for BaseTensor,
@@ -13,9 +14,15 @@ Features demonstrated:
 6. Helper query methods (get_f_orbitals, is_spinful_system, etc.)
 """
 
+import sys
+from pathlib import Path
+
+# Add src to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
 import torch
 from condmatTensor.core import BaseTensor, OrbitalMetadata, get_device
-from condmatTensor.lattice import BravaisLattice, TightBindingModel, generate_k_path
+from condmatTensor.lattice import BravaisLattice, HoppingModel, generate_k_path
 
 
 def demo_string_format():
@@ -254,14 +261,14 @@ def demo_kagome_with_metadata():
         num_orbitals=num_orbitals,
     )
 
-    # Create TightBindingModel with metadata (note: orbital_labels are auto-generated)
+    # Create HoppingModel with metadata (note: orbital_labels are auto-generated)
     orbital_metadatas = [
         OrbitalMetadata(site="A", orb="px"),
         OrbitalMetadata(site="B", orb="py"),
         OrbitalMetadata(site="C", orb="pz"),
     ]
 
-    model = TightBindingModel(
+    model = HoppingModel(
         lattice=lattice,
         orbital_metadatas=orbital_metadatas,
     )

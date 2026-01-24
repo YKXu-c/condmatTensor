@@ -17,7 +17,7 @@ import torch
 
 from condmatTensor.manybody import pauli_matrices, LocalMagneticModel, KondoLatticeSolver
 from condmatTensor.core import BaseTensor
-from condmatTensor.lattice import BravaisLattice, TightBindingModel, generate_kmesh
+from condmatTensor.lattice import BravaisLattice, HoppingModel, generate_kmesh
 from condmatTensor.optimization import BayesianOptimizer
 
 
@@ -76,7 +76,7 @@ def test_self_consistency_loop():
     )
 
     orbital_labels = ["A_up", "A_down", "B_up", "B_down"]
-    tb_model = TightBindingModel(lattice, orbital_labels=orbital_labels)
+    tb_model = HoppingModel(lattice, orbital_labels=orbital_labels)
 
     # Add hoppings
     t = -1.0
@@ -151,7 +151,7 @@ def test_kondo_solver():
     )
 
     orbital_labels = ["c_up", "c_down"]
-    tb_model = TightBindingModel(lattice, orbital_labels=orbital_labels)
+    tb_model = HoppingModel(lattice, orbital_labels=orbital_labels)
 
     # Add hopping
     t = -1.0

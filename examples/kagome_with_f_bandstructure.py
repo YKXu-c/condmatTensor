@@ -34,7 +34,7 @@ import torch
 import matplotlib.pyplot as plt
 
 from condmatTensor.core import BaseTensor
-from condmatTensor.lattice import BravaisLattice, TightBindingModel, generate_k_path, generate_kmesh
+from condmatTensor.lattice import BravaisLattice, HoppingModel, generate_k_path, generate_kmesh
 from condmatTensor.solvers import diagonalize
 from condmatTensor.analysis import BandStructure, DOSCalculator
 from condmatTensor.manybody import SpectralFunction
@@ -162,14 +162,14 @@ def build_kagome_f_hamiltonian_k_space(
     return Hk
 
 
-def build_kagome_f_tight_binding_model(
+def build_kagome_f_hopping_model(
     lattice: BravaisLattice,
     t: float = -1.0,
     t_f: float = -0.5,
     epsilon_f: float = 0.0,
-) -> TightBindingModel:
+) -> HoppingModel:
     """
-    Build TightBindingModel for Kagome-F lattice.
+    Build HoppingModel for Kagome-F lattice.
 
     Args:
         lattice: BravaisLattice object
@@ -178,10 +178,10 @@ def build_kagome_f_tight_binding_model(
         epsilon_f: On-site energy for f-orbital
 
     Returns:
-        TightBindingModel object
+        HoppingModel object
     """
     # Create model with 4 orbitals (A, B, C for Kagome, f for central orbital)
-    tb_model = TightBindingModel(lattice, orbital_labels=["A", "B", "C", "f"])
+    tb_model = HoppingModel(lattice, orbital_labels=["A", "B", "C", "f"])
 
     # Kagome-Kagome hopping (same as pure Kagome)
     hop_val = -t  # Actual hopping amplitude
@@ -273,8 +273,8 @@ def main():
     print("METHOD 2: TightBindingModel.build_Hk")
     print("=" * 70)
 
-    print("\n3b. Creating TightBindingModel...")
-    tb_model = build_kagome_f_tight_binding_model(lattice, t=t, t_f=t_f, epsilon_f=epsilon_f)
+    print("\n3b. Creating HoppingModel...")
+    tb_model = build_kagome_f_hopping_model(lattice, t=t, t_f=t_f, epsilon_f=epsilon_f)
     print(f"   Number of hopping terms: {len(tb_model.hoppings)}")
     print(f"   Orbital labels: {tb_model.orbital_labels}")
 
@@ -330,9 +330,9 @@ def main():
     diff_direct_fourier = torch.max(torch.abs(eigenvalues_direct - eigenvalues_fourier)).item()
     diff_tb_fourier = torch.max(torch.abs(eigenvalues_tb - eigenvalues_fourier)).item()
 
-    print(f"\n   Max difference (Direct vs TightBindingModel):  {diff_direct_tb:.2e}")
+    print(f"\n   Max difference (Direct vs HoppingModel):  {diff_direct_tb:.2e}")
     print(f"   Max difference (Direct vs Fourier):            {diff_direct_fourier:.2e}")
-    print(f"   Max difference (TightBindingModel vs Fourier): {diff_tb_fourier:.2e}")
+    print(f"   Max difference (HoppingModel vs Fourier): {diff_tb_fourier:.2e}")
 
     if diff_direct_tb < 1e-6 and diff_direct_fourier < 1e-6:
         print("\n   ✓ All methods agree! (difference < 1e-6)")
@@ -353,10 +353,10 @@ def main():
     bs1.compute(eigenvalues_direct, k_path, ticks)
     bs1.plot(ax=axes[0], ylabel="Energy ($|t|$)", title="Method 1: Direct k-space")
 
-    # Method 2: TightBindingModel
+    # Method 2: HoppingModel
     bs2 = BandStructure()
     bs2.compute(eigenvalues_tb, k_path, ticks)
-    bs2.plot(ax=axes[1], ylabel="Energy ($|t|$)", title="Method 2: TightBindingModel.build_Hk")
+    bs2.plot(ax=axes[1], ylabel="Energy ($|t|$)", title="Method 2: HoppingModel.build_Hk")
 
     # Method 3: Fourier from H(R)
     bs3 = BandStructure()

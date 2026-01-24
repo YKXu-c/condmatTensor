@@ -4,9 +4,9 @@ from typing import List, Optional, Tuple, Union
 import torch
 
 
-class TightBindingModel:
+class HoppingModel:
     """
-    General tight-binding model builder.
+    General hopping model builder.
 
     Reads symbolic hopping terms and constructs H(R) and H(k).
     Each hopping term is: (orb_i, orb_j, displacement, hopping_value)
@@ -15,6 +15,9 @@ class TightBindingModel:
     Supports both integer orbital indices and string orbital labels:
         (0, 1, torch.tensor([0, 0]), 1.0)  # using indices
         ("A", "B", torch.tensor([0, 0]), 1.0)  # using labels
+
+    Note: This is a general hopping model that supports arbitrary hoppings
+    at any distance, not just nearest-neighbor "tight-binding" models.
 
     Attributes:
         lattice: BravaisLattice object
@@ -30,7 +33,7 @@ class TightBindingModel:
         hoppings: Optional[List[Tuple]] = None,
     ) -> None:
         """
-        Initialize TightBindingModel.
+        Initialize HoppingModel.
 
         Args:
             lattice: BravaisLattice object
@@ -225,20 +228,20 @@ class TightBindingModel:
             displacements=None,  # k-space has no displacements
         )
 
-    def to(self, device: torch.device) -> "TightBindingModel":
+    def to(self, device: torch.device) -> "HoppingModel":
         """Move model to device (CPU/GPU).
 
-        Creates a new TightBindingModel with lattice moved to the specified device.
+        Creates a new HoppingModel with lattice moved to the specified device.
         The hopping terms are moved to the device when build_Hk or build_HR is called.
 
         Args:
             device: Target device (e.g., torch.device('cuda') or torch.device('cpu'))
 
         Returns:
-            New TightBindingModel instance on the specified device
+            New HoppingModel instance on the specified device
 
         Examples:
-            >>> model = TightBindingModel(lattice, orbital_labels=['A', 'B', 'C'])
+            >>> model = HoppingModel(lattice, orbital_labels=['A', 'B', 'C'])
             >>> model_gpu = model.to(torch.device('cuda'))
         """
         # Create new instance with lattice moved to device

@@ -42,7 +42,7 @@ from typing import Dict, List
 import copy
 
 from condmatTensor.core import BaseTensor
-from condmatTensor.lattice import BravaisLattice, TightBindingModel, generate_k_path
+from condmatTensor.lattice import BravaisLattice, HoppingModel, generate_k_path
 
 
 class OptimizationTracker:
@@ -146,7 +146,7 @@ def build_kagome_lattice(t: float = -1.0) -> BravaisLattice:
 
 def build_kagome_hamiltonian(lattice: BravaisLattice, t: float = -1.0) -> BaseTensor:
     """Build Kagome tight-binding Hamiltonian."""
-    tb_model = TightBindingModel(lattice)
+    tb_model = HoppingModel(lattice)
 
     # Nearest-neighbor hopping (must match kagome_bandstructure.py)
     # A <-> B hopping
@@ -193,14 +193,14 @@ def build_kagome_f_system(
         torch.tensor([1/3, 1/3]),  # f-orbital at center
     ]
 
-    # Note: BravaisLattice doesn't take orbital_labels - set in TightBindingModel
+    # Note: BravaisLattice doesn't take orbital_labels - set in HoppingModel
     orbital_labels = ["A", "B", "C", "f"]
     lattice = BravaisLattice(
         cell_vectors=cell_vectors,
         basis_positions=basis_positions,
         num_orbitals=[1, 1, 1, 1],  # 4 sites, each with 1 orbital
     )
-    tb_model = TightBindingModel(lattice, orbital_labels=orbital_labels)
+    tb_model = HoppingModel(lattice, orbital_labels=orbital_labels)
 
     # Kagome-Kagome hopping (must match kagome_with_f_bandstructure.py)
     # Using add_hermitian=False to match the reference implementation
@@ -1280,7 +1280,7 @@ def main():
 
     H_cc_spinless = build_kagome_hamiltonian(lattice_cc, t)
     # Rebuild on k_path with correct hopping
-    tb_cc = TightBindingModel(lattice_cc)
+    tb_cc = HoppingModel(lattice_cc)
     tb_cc.add_hopping(0, 1, [0, 0], t, add_hermitian=False)
     tb_cc.add_hopping(1, 0, [0, 0], t, add_hermitian=False)
     tb_cc.add_hopping(0, 1, [-1, 0], t, add_hermitian=False)
@@ -1325,7 +1325,7 @@ def main():
         basis_positions=basis_positions,
         num_orbitals=[1, 1, 1, 1],
     )
-    tb_full = TightBindingModel(lattice_full_spinless, orbital_labels=orbital_labels_full)
+    tb_full = HoppingModel(lattice_full_spinless, orbital_labels=orbital_labels_full)
     # Kagome-Kagome hopping
     tb_full.add_hopping("A", "B", [0, 0], t, add_hermitian=False)
     tb_full.add_hopping("B", "A", [0, 0], t, add_hermitian=False)

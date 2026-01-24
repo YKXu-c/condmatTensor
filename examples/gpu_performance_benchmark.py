@@ -43,7 +43,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from condmatTensor.core import is_cuda_available, get_device
-from condmatTensor.lattice import BravaisLattice, TightBindingModel, generate_kmesh, generate_k_path
+from condmatTensor.lattice import BravaisLattice, HoppingModel, generate_kmesh, generate_k_path
 from condmatTensor.solvers import diagonalize
 from condmatTensor.optimization import BayesianOptimizer
 
@@ -70,9 +70,9 @@ def build_kagome_lattice(t: float = -1.0) -> BravaisLattice:
     )
 
 
-def build_kagome_model(lattice: BravaisLattice, t: float = -1.0) -> TightBindingModel:
+def build_kagome_model(lattice: BravaisLattice, t: float = -1.0) -> HoppingModel:
     """Build Kagome tight-binding model."""
-    tb_model = TightBindingModel(lattice)
+    tb_model = HoppingModel(lattice)
 
     # Nearest-neighbor hopping
     tb_model.add_hopping(0, 1, [0, 0], t, add_hermitian=False)
@@ -93,7 +93,7 @@ def build_kagome_model(lattice: BravaisLattice, t: float = -1.0) -> TightBinding
 
 def benchmark_hamiltonian_construction(
     lattice: BravaisLattice,
-    tb_model: TightBindingModel,
+    tb_model: HoppingModel,
     nk_list: list,
     device: torch.device,
     n_trials: int = 3,
@@ -177,7 +177,7 @@ def benchmark_diagonalization(
 
 def benchmark_dos(
     lattice: BravaisLattice,
-    tb_model: TightBindingModel,
+    tb_model: HoppingModel,
     nk_list: list,
     device: torch.device,
     n_trials: int = 3,
