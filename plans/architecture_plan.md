@@ -2187,6 +2187,77 @@ def test_ipt_benchmark():
     assert torch.allclose(G_computed, G_analytic, atol=1e-3)
 ```
 
+### Rule 5: Development Logging
+
+All development work must be logged in the `developLog/` directory to maintain a comprehensive record of project evolution.
+
+**Required Logging Structure:**
+
+```bash
+developLog/
+├── allAPI.md              # Complete API documentation (all modules, examples, parameters)
+├── developLog_YYYY-MM-DD.md  # Daily development log entries
+└── ...
+```
+
+**Required Contents:**
+
+1. **`developLog/allAPI.md`** - Complete API documentation containing:
+   - All modules organized by level (1-10)
+   - Usage examples for each method/class
+   - API descriptions with full parameters
+   - Return types and behavior
+   - Cross-references between related modules
+
+2. **`developLog/developLog_YYYY-MM-DD.md`** - Daily development logs containing:
+   - Date of work session
+   - Summary of changes made
+   - New features implemented
+   - Bugs fixed or issues resolved
+   - API changes or deprecations
+   - Validation/test results
+   - Next steps or pending items
+
+**When to Create/Update Logs:**
+
+- Create a new daily log file when starting development work on a new day
+- Update `allAPI.md` whenever:
+  - A new module is implemented
+  - A new class/function is added
+  - API signatures change
+  - New examples are added
+
+**Logging Template:**
+
+```markdown
+# Development Log - YYYY-MM-DD
+
+## Summary
+[Brief description of work done]
+
+## Changes Made
+- [ ] Feature 1
+- [ ] Feature 2
+
+## API Changes
+- New: `function_name()` - Description
+- Changed: `ClassName.method()` - Modified behavior
+- Deprecated: `old_function()` - Use `new_function()` instead
+
+## Validation
+- [ ] Test passed: description
+- [ ] Benchmark: results
+
+## Next Steps
+1. Item 1
+2. Item 2
+```
+
+**Rationale**: Maintains comprehensive project history, aids in onboarding new developers, and provides traceability for all changes.
+
+**Cross-Reference Files:**
+- This rule is also documented in: `CLAUDE.md`, `.cursorrules`
+
 ## Architecture Comparison with Reference Libraries
 
 ### Comparison Table
