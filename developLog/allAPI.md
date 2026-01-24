@@ -192,6 +192,90 @@ Hk = HR.to_k_space(k_points)
 print(Hk.labels)  # ['k', 'orb_i', 'orb_j']
 ```
 
+**Orbital Metadata System**:
+
+BaseTensor now supports structured orbital metadata via the `orbital_metadatas` parameter:
+
+```python
+from condmatTensor.core import BaseTensor, OrbitalMetadata
+
+# Using OrbitalMetadata objects
+orbital_metadatas = [
+    OrbitalMetadata(site='Ce1', orb='f', spin='up', local=True, U=7.0),
+    OrbitalMetadata(site='Ce1', orb='f', spin='down', local=True, U=7.0),
+]
+
+H = BaseTensor(
+    tensor=torch.zeros((100, 2, 2)),
+    labels=['k', 'orb_i', 'orb_j'],
+    orbital_metadatas=orbital_metadatas,
+)
+
+# Query orbitals by properties
+f_indices = H.get_f_orbitals()  # [0, 1]
+is_spinful = H.is_spinful_system()  # True
+```
+
+**Methods for Orbital Metadata**:
+
+| Method | Description |
+|--------|-------------|
+| `get_f_orbitals()` | Get indices of f-orbitals |
+| `get_orbitals_by_site(site)` | Get indices of orbitals at a specific site |
+| `get_spinful_orbitals()` | Get indices of spinful orbitals |
+| `is_spinful_system()` | Check if system is spinful |
+| `get_localized_orbitals()` | Get indices of localized orbitals |
+
+---
+
+#### `OrbitalMetadata`
+
+Structured metadata for a single orbital.
+
+**File**: `core/types.py:11-162`
+
+```python
+OrbitalMetadata(site=None, orb=None, spin=None, local=None, U=None, name=None)
+```
+
+**Parameters**:
+- `site` (str, optional): Site identifier (e.g., 'Ce1', 'atom1')
+- `orb` (str, optional): Orbital type (e.g., 's', 'px', 'dxy', 'f')
+- `spin` (str, optional): Spin projection ('up', 'down', or None)
+- `local` (bool, optional): Localized (True) vs conductive (False)
+- `U` (float, optional): Hubbard U parameter
+- `name` (str, optional): Display name override
+
+**Methods**:
+
+| Method | Description |
+|--------|-------------|
+| `to_string()` | Convert to string format (e.g., 'Ce1-f-spin_up-local-U7.0') |
+| `is_f_orbital()` | Check if this is an f-orbital |
+| `is_spinful()` | Check if this orbital has spin information |
+| `is_localized()` | Check if this orbital is localized |
+| `from_string(s)` | Parse orbital metadata from string (classmethod) |
+| `as_dict()` | Convert to dictionary for serialization |
+| `from_dict(d)` | Create from dictionary (classmethod) |
+
+**Example**:
+```python
+from condmatTensor.core import OrbitalMetadata
+
+# Create from parameters
+md = OrbitalMetadata(site='Ce1', orb='f', spin='up', local=True, U=7.0)
+print(md.to_string())  # 'Ce1-f-spin_up-local-U7.0'
+
+# Parse from string
+md2 = OrbitalMetadata.from_string('Ce1-f-spin_up-local-U7.0')
+print(md2.site, md2.orb, md2.spin)  # ('Ce1', 'f', 'up')
+
+# Query properties
+print(md2.is_f_orbital())  # True
+print(md2.is_spinful())  # True
+print(md2.is_localized())  # True
+```
+
 ---
 
 ### Functions
@@ -1054,7 +1138,7 @@ Convenience function for simple backend optimization.
 
 ```python
 # LEVEL 1: Core
-from condmatTensor.core import BaseTensor, get_device
+from condmatTensor.core import BaseTensor, OrbitalMetadata, get_device
 
 # LEVEL 2: Lattice
 from condmatTensor.lattice import (

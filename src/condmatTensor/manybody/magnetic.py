@@ -231,12 +231,27 @@ class LocalMagneticModel:
 
         # Create orbital names with spin suffixes
         orbital_names = None
+        orbital_metadatas = None
         if H0_spinless.orbital_names is not None:
             orbital_names = []
+            orbital_metadatas = []
             if lattice is None:
                 for name in H0_spinless.orbital_names:
                     orbital_names.append(f"{name}_up")
                     orbital_names.append(f"{name}_down")
+                # Create orbital metadatas with spin if source has metadatas
+                if H0_spinless.orbital_metadatas is not None:
+                    from condmatTensor.core.types import OrbitalMetadata
+                    for md in H0_spinless.orbital_metadatas:
+                        md_up = OrbitalMetadata(
+                            site=md.site, orb=md.orb, spin='up',
+                            local=md.local, U=md.U
+                        )
+                        md_down = OrbitalMetadata(
+                            site=md.site, orb=md.orb, spin='down',
+                            local=md.local, U=md.U
+                        )
+                        orbital_metadatas.extend([md_up, md_down])
             else:
                 # Per-site orbital naming
                 for site_idx, n_orb_site in enumerate(lattice.num_orbitals):
@@ -244,11 +259,25 @@ class LocalMagneticModel:
                         base_name = H0_spinless.orbital_names[offsets[site_idx] + i]
                         orbital_names.append(f"{base_name}_up")
                         orbital_names.append(f"{base_name}_down")
+                # Create orbital metadatas with spin if source has metadatas
+                if H0_spinless.orbital_metadatas is not None:
+                    from condmatTensor.core.types import OrbitalMetadata
+                    for md in H0_spinless.orbital_metadatas:
+                        md_up = OrbitalMetadata(
+                            site=md.site, orb=md.orb, spin='up',
+                            local=md.local, U=md.U
+                        )
+                        md_down = OrbitalMetadata(
+                            site=md.site, orb=md.orb, spin='down',
+                            local=md.local, U=md.U
+                        )
+                        orbital_metadatas.extend([md_up, md_down])
 
         return BaseTensor(
             tensor=H_spinful,
             labels=["k", "orb_i", "orb_j"],
             orbital_names=orbital_names,
+            orbital_metadatas=orbital_metadatas if orbital_metadatas else None,
             displacements=None,
         )
 
