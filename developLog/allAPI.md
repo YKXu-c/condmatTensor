@@ -2,7 +2,7 @@
 
 **Version**: 0.0.1
 **License**: MIT
-**Implementation Status**: ~45% complete (5 of 10 levels partially/fully implemented, ~4,760 lines)
+**Implementation Status**: ~45% complete (5 of 10 levels partially/fully implemented, ~5,400 lines)
 
 ---
 
@@ -834,7 +834,38 @@ SpinFermionModel(H0=None, J_tensor=None, S_init=None)
 
 **Status**: ⚠️ Partial (Topology, QGT not implemented)
 **Path**: `src/condmatTensor/analysis/`
-**Files**: `dos.py` (313 lines), `bandstr.py` (238 lines)
+**Files**: `dos.py` (~520 lines), `bandstr.py` (~550 lines), `plotting_style.py` (70 lines)
+
+### Modules
+
+#### `plotting_style`
+
+Standardized plotting style constants for publication-quality plots.
+
+**File**: `analysis/plotting_style.py:1-70`
+
+**Constants**:
+
+| Constant | Description |
+|----------|-------------|
+| `DEFAULT_FIGURE_SIZES` | Dict of predefined figure sizes ('single', 'dual', 'triple', '2x2', 'band_dos', etc.) |
+| `DEFAULT_COLORS` | Dict of color scheme (primary, reference, secondary, etc.) |
+| `DEFAULT_FONTSIZES` | Dict of font sizes for labels, titles, legend, etc. |
+| `DEFAULT_STYLING` | Dict of styling options (grid_alpha, band_linewidth, dpi, etc.) |
+| `DEFAULT_COLORMAPS` | Dict of colormaps (orbital_weight, spin, orbitals, etc.) |
+| `LINE_STYLES` | Dict of line styles (solid, dashed, dotted, dash_dot) |
+| `MARKER_STYLES` | Dict of marker styles (circle, square, triangle, etc.) |
+
+**Example**:
+```python
+from condmatTensor.analysis import DEFAULT_COLORS, DEFAULT_FIGURE_SIZES
+import matplotlib.pyplot as plt
+
+fig, ax = plt.subplots(figsize=DEFAULT_FIGURE_SIZES['single'])
+ax.plot(x, y, color=DEFAULT_COLORS['primary'])
+```
+
+---
 
 ### Classes
 
@@ -842,7 +873,7 @@ SpinFermionModel(H0=None, J_tensor=None, S_init=None)
 
 Density of States calculator with Lorentzian broadening.
 
-**File**: `analysis/dos.py:20-164`
+**File**: `analysis/dos.py:25-361`
 
 ```python
 DOSCalculator()
@@ -855,11 +886,14 @@ DOSCalculator()
 | `from_eigenvalues(E_k, omega, eta=0.02)` | Compute DOS from eigenvalues |
 | `from_spectral_function(A, omega)` | Compute DOS from spectral function |
 | `plot(ax=None, energy_range=None, ylabel, xlabel, title, fontsize=12, fill=True, **kwargs)` | Plot DOS |
+| `plot_with_reference(reference_energies, labels=None, colors=None, linestyles=None, ax=None, energy_range=None, ylabel, xlabel, title, fontsize=12, legend=True, **kwargs)` | Plot DOS with vertical reference lines |
+| `plot_comparison(other_dos_data, labels, colors=None, alpha=0.7, ax=None, energy_range=None, ylabel, xlabel, title, fontsize=12, linewidth=1.5, legend=True, fill=False, **kwargs)` | Overlay multiple DOS curves |
+| `plot_multi_panel(dos_list, titles, figsize=None, energy_range=None, ylabel, xlabel, fontsize=12, sharex=True, sharey=True, **kwargs)` | Create multi-panel DOS comparison |
 
 **Formula**:
 DOS(ω) = Σ_k (1/π) * η / [(ω - E_k)² + η²]
 
-**Example**:
+**Examples**:
 ```python
 from condmatTensor.analysis import DOSCalculator
 import torch
@@ -868,6 +902,12 @@ omega = torch.linspace(-3, 3, 1000)
 dos_calc = DOSCalculator()
 dos = dos_calc.from_eigenvalues(evals, omega, eta=0.02)
 dos_calc.plot()
+
+# Plot with reference line for flat band
+dos_calc.plot_with_reference(-2.0, label='Flat band')
+
+# Compare two DOS curves
+dos_calc.plot_comparison((omega2, rho2), labels=['Model 1', 'Model 2'])
 ```
 
 ---
@@ -876,7 +916,7 @@ dos_calc.plot()
 
 Projected DOS onto specific orbitals.
 
-**File**: `analysis/dos.py:166-313`
+**File**: `analysis/dos.py:364-522`
 
 ```python
 ProjectedDOS()
@@ -903,9 +943,9 @@ pdos_calc.plot_projected(stacked=True)
 
 #### `BandStructure`
 
-Band structure calculator with plotting.
+Band structure calculator with publication-quality plotting methods.
 
-**File**: `analysis/bandstr.py:15-238`
+**File**: `analysis/bandstr.py:20-550`
 
 ```python
 BandStructure()
@@ -918,14 +958,34 @@ BandStructure()
 | `compute(eigenvalues, k_path, ticks=None)` | Store band structure results |
 | `plot(ax=None, energy_range=None, ylabel, title, fontsize=12, **kwargs)` | Plot band structure |
 | `plot_with_dos(eigenvalues_mesh, omega, eta=0.02, energy_range=None, ylabel, dos_xlabel, title, fontsize=12, figsize=(10, 5), dos_color='skyblue', **kwargs)` | Plot bands + DOS |
+| `plot_colored_by_weight(eigenvectors, orbital_indices, ax=None, cmap='viridis', s=10, vmin=0, vmax=1, ylabel, xlabel, title, fontsize=12, colorbar=True, colorbar_label='Orbital weight', **kwargs)` | Plot bands colored by orbital weight |
+| `add_reference_line(energy, label=None, color='red', linestyle='--', alpha=0.7, ax=None, **kwargs)` | Add horizontal reference line |
+| `plot_comparison(other_eigenvalues, labels, colors=None, alpha=0.6, ax=None, energy_range=None, ylabel, title, fontsize=12, linewidth=1.0, legend=True, **kwargs)` | Overlay multiple band structures |
+| `plot_multi_panel(eigenvalues_list, titles, k_paths=None, ticks_list=None, figsize=None, energy_range=None, ylabel, fontsize=12, **kwargs)` | Create multi-panel comparison |
 
-**Example**:
+**Examples**:
 ```python
 from condmatTensor.analysis import BandStructure
 
+# Basic band structure
 bs = BandStructure()
 bs.compute(evals, k_path, ticks=[0, 50, 100, 150])
-bs.plot(tick_labels=['G', 'K', 'M', 'G'])
+bs.plot()
+
+# Add reference line for flat band
+ax = bs.plot()
+bs.add_reference_line(-2.0, label='Flat band')
+plt.legend()
+
+# Color by f-orbital weight
+bs.plot_colored_by_weight(eigenvectors, orbital_indices=[6, 7])
+
+# Compare full vs effective model
+bs.plot_comparison(evals_eff, labels=['Full', 'Effective'])
+
+# Multi-panel comparison
+bs.plot_multi_panel([evals1, evals2, evals3], titles=['t_f=-1.0', 't_f=-0.5', 't_f=0.0'])
+```
 ```
 
 ---
@@ -1169,7 +1229,15 @@ from condmatTensor.manybody.magnetic import (
 from condmatTensor.analysis import (
     DOSCalculator,
     ProjectedDOS,
-    BandStructure
+    BandStructure,
+    # Plotting style constants
+    DEFAULT_FIGURE_SIZES,
+    DEFAULT_COLORS,
+    DEFAULT_FONTSIZES,
+    DEFAULT_STYLING,
+    DEFAULT_COLORMAPS,
+    LINE_STYLES,
+    MARKER_STYLES,
 )
 
 # LEVEL 7: Optimization
@@ -1239,4 +1307,4 @@ The `examples/` directory demonstrates and validates core physics:
 
 ---
 
-*Last Updated: 2026-01-24*
+*Last Updated: 2026-01-25*

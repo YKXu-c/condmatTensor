@@ -5,7 +5,7 @@ Future Work:
     - from_spectral_function(): Direct A(ω) input with k-resolved averaging
 """
 
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List, Union
 import torch
 import math
 
@@ -15,6 +15,14 @@ try:
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
+
+from condmatTensor.analysis.plotting_style import (
+    DEFAULT_FIGURE_SIZES,
+    DEFAULT_COLORS,
+    DEFAULT_FONTSIZES,
+    DEFAULT_STYLING,
+    LINE_STYLES,
+)
 
 
 class DOSCalculator:
@@ -161,6 +169,287 @@ class DOSCalculator:
             ax.set_xlim(energy_range)
 
         return ax
+
+    def plot_with_reference(
+        self,
+        reference_energies: Union[float, List[float]],
+        labels: Optional[Union[str, List[str]]] = None,
+        colors: Optional[Union[str, List[str]]] = None,
+        linestyles: Optional[Union[str, List[str]]] = None,
+        ax: Optional["maxes.Axes"] = None,
+        energy_range: Optional[Tuple[float, float]] = None,
+        ylabel: str = r"DOS (states/$|t|$)",
+        xlabel: str = r"Energy $\omega$ ($|t|$)",
+        title: str = "Density of States with Reference Lines",
+        fontsize: int = 12,
+        legend: bool = True,
+        **kwargs,
+    ) -> "maxes.Axes":
+        """
+        Plot DOS with vertical reference lines at specified energies.
+
+        Useful for marking flat bands, Fermi level, Van Hove singularities, etc.
+
+        Args:
+            reference_energies: Energy value(s) for vertical reference lines
+            labels: Label(s) for the reference lines (shown in legend)
+            colors: Color(s) for the reference lines (default: red)
+            linestyles: Line style(s) for the reference lines (default: '--')
+            ax: Matplotlib axis (if None, creates new figure)
+            energy_range: (xmin, xmax) for energy axis
+            ylabel: Label for y-axis
+            xlabel: Label for x-axis
+            title: Plot title
+            fontsize: Font size for labels
+            legend: Whether to show legend
+            **kwargs: Additional arguments for DOS plot (fill, color, etc.)
+
+        Returns:
+            Matplotlib axis with DOS plot and reference lines
+
+        Example:
+            >>> dos = DOSCalculator()
+            >>> dos.from_eigenvalues(eigenvalues, omega, eta=0.05)
+            >>> dos.plot_with_reference(-2.0, label='Flat band')
+        """
+        if not MATPLOTLIB_AVAILABLE:
+            raise ImportError("matplotlib is required for plotting")
+
+        # Create base DOS plot
+        ax = self.plot(ax=ax, energy_range=energy_range, ylabel=ylabel,
+                      xlabel=xlabel, title=title, fontsize=fontsize,
+                      color=DEFAULT_COLORS['fill_default'], **kwargs)
+
+        # Normalize inputs to lists
+        if isinstance(reference_energies, (int, float)):
+            reference_energies = [float(reference_energies)]
+        if labels is not None and isinstance(labels, str):
+            labels = [labels]
+        if colors is not None and isinstance(colors, str):
+            colors = [colors]
+        if linestyles is not None and isinstance(linestyles, str):
+            linestyles = [linestyles]
+
+        # Default styling
+        if colors is None:
+            colors = [DEFAULT_COLORS['reference']] * len(reference_energies)
+        if linestyles is None:
+            linestyles = [LINE_STYLES['dashed']] * len(reference_energies)
+
+        # Add reference lines
+        for i, energy in enumerate(reference_energies):
+            label = labels[i] if labels and i < len(labels) else None
+            color = colors[i] if i < len(colors) else colors[-1]
+            linestyle = linestyles[i] if i < len(linestyles) else linestyles[-1]
+
+            ax.axvline(x=energy, color=color, linestyle=linestyle,
+                      alpha=DEFAULT_STYLING['overlay_alpha'],
+                      label=label, linewidth=DEFAULT_STYLING['reference_linewidth'])
+
+        if legend and labels:
+            ax.legend(fontsize=DEFAULT_FONTSIZES['legend'])
+
+        return ax
+
+    def plot_comparison(
+        self,
+        other_dos_data: Union[Tuple[torch.Tensor, torch.Tensor],
+                              List[Tuple[torch.Tensor, torch.Tensor]]],
+        labels: Union[str, List[str]],
+        colors: Optional[Union[str, List[str]]] = None,
+        alpha: float = 0.7,
+        ax: Optional["maxes.Axes"] = None,
+        energy_range: Optional[Tuple[float, float]] = None,
+        ylabel: str = r"DOS (states/$|t|$)",
+        xlabel: str = r"Energy $\omega$ ($|t|$)",
+        title: str = "DOS Comparison",
+        fontsize: int = 12,
+        linewidth: float = 1.5,
+        legend: bool = True,
+        fill: bool = False,
+        **kwargs,
+    ) -> "maxes.Axes":
+        """
+        Overlay multiple DOS curves for comparison.
+
+        Useful for comparing DOS from different models, parameters, or methods.
+
+        Args:
+            other_dos_data: DOS data to compare.
+                Tuple (omega, rho): plots this vs stored DOS.
+                List of tuples: plots all of them.
+            labels: Label(s) for the legend
+            colors: Color(s) for the plots (default: auto-generated)
+            alpha: Transparency for overlaid curves
+            ax: Matplotlib axis (if None, creates new figure)
+            energy_range: (xmin, xmax) for energy axis
+            ylabel: Label for y-axis
+            xlabel: Label for x-axis
+            title: Plot title
+            fontsize: Font size for labels
+            linewidth: Line width
+            legend: Whether to show legend
+            fill: Whether to fill under curves
+            **kwargs: Additional arguments for plot()
+
+        Returns:
+            Matplotlib axis with comparison plot
+
+        Example:
+            >>> dos1 = DOSCalculator()
+            >>> dos1.from_eigenvalues(eig1, omega, eta=0.05)
+            >>> dos2 = DOSCalculator()
+            >>> dos2.from_eigenvalues(eig2, omega, eta=0.05)
+            >>> dos1.plot_comparison((dos2.omega, dos2.rho), labels=['Model 1', 'Model 2'])
+        """
+        if not MATPLOTLIB_AVAILABLE:
+            raise ImportError("matplotlib is required for plotting")
+
+        if self.omega is None or self.rho is None:
+            raise ValueError("Call from_eigenvalues() first to compute DOS")
+
+        if ax is None:
+            fig, ax = plt.subplots(figsize=DEFAULT_FIGURE_SIZES['single'])
+
+        # Normalize input to lists
+        if isinstance(other_dos_data, tuple) and len(other_dos_data) == 2:
+            other_dos_data = [other_dos_data]
+        if isinstance(labels, str):
+            labels = [labels]
+
+        # Default colors
+        if colors is None:
+            default_colors = [DEFAULT_COLORS['primary'], DEFAULT_COLORS['secondary'],
+                            DEFAULT_COLORS['tertiary'], DEFAULT_COLORS['quaternary']]
+            colors = default_colors[:len(other_dos_data) + 1]
+        if isinstance(colors, str):
+            colors = [colors]
+
+        # Collect all DOS data
+        all_dos = [(self.omega, self.rho)] + list(other_dos_data)
+        all_labels = ['Original'] + list(labels)
+        all_colors = list(colors) if len(colors) > 1 else [colors[0]] * len(all_dos)
+
+        for (omega, rho), label, color in zip(all_dos, all_labels, all_colors):
+            omega_np = omega.cpu().numpy() if hasattr(omega, 'cpu') else omega.numpy()
+            rho_np = rho.cpu().numpy() if hasattr(rho, 'cpu') else rho.numpy()
+
+            if fill:
+                ax.fill_between(omega_np, 0, rho_np, color=color, alpha=alpha * 0.5, **kwargs)
+                ax.plot(omega_np, rho_np, color=color, linewidth=linewidth, label=label, **kwargs)
+            else:
+                ax.plot(omega_np, rho_np, color=color, alpha=alpha,
+                       linewidth=linewidth, label=label, **kwargs)
+
+        ax.set_xlabel(xlabel, fontsize=DEFAULT_FONTSIZES['labels'])
+        ax.set_ylabel(ylabel, fontsize=DEFAULT_FONTSIZES['labels'])
+        ax.set_title(title, fontsize=DEFAULT_FONTSIZES['titles'])
+        ax.grid(True, alpha=DEFAULT_STYLING['grid_alpha'])
+
+        if energy_range is not None:
+            ax.set_xlim(energy_range)
+
+        if legend:
+            ax.legend(fontsize=DEFAULT_FONTSIZES['legend'])
+
+        return ax
+
+    def plot_multi_panel(
+        self,
+        dos_list: List[Tuple[torch.Tensor, torch.Tensor]],
+        titles: List[str],
+        figsize: Optional[Tuple[float, float]] = None,
+        energy_range: Optional[Tuple[float, float]] = None,
+        ylabel: str = r"DOS (states/$|t|$)",
+        xlabel: str = r"Energy $\omega$ ($|t|$)",
+        fontsize: int = 12,
+        sharex: bool = True,
+        sharey: bool = True,
+        **kwargs,
+    ) -> Tuple["maxes.Axes", ...]:
+        """
+        Create multi-panel DOS comparison.
+
+        Each panel shows a separate DOS curve. Useful for comparing
+        different parameters, models, or systems.
+
+        Args:
+            dos_list: List of (omega, rho) tuples for each panel
+            titles: Title for each panel
+            figsize: Figure size (auto-calculated if None)
+            energy_range: (xmin, xmax) for energy axis (shared if sharex=True)
+            ylabel: Label for y-axis
+            xlabel: Label for x-axis
+            fontsize: Font size for labels
+            sharex: Whether to share x-axis across panels
+            sharey: Whether to share y-axis across panels
+            **kwargs: Additional arguments for plot()
+
+        Returns:
+            Tuple of matplotlib axes, one for each panel
+
+        Example:
+            >>> dos1 = DOSCalculator()
+            >>> dos1.from_eigenvalues(eig1, omega, eta=0.05)
+            >>> dos2 = DOSCalculator()
+            >>> dos2.from_eigenvalues(eig2, omega, eta=0.05)
+            >>> axes = dos1.plot_multi_panel(
+            ...     [(dos1.omega, dos1.rho), (dos2.omega, dos2.rho)],
+            ...     titles=['Model 1', 'Model 2']
+            ... )
+        """
+        if not MATPLOTLIB_AVAILABLE:
+            raise ImportError("matplotlib is required for plotting")
+
+        n_panels = len(dos_list)
+
+        # Auto-layout
+        if n_panels == 1:
+            ncols, nrows = 1, 1
+        elif n_panels == 2:
+            ncols, nrows = 2, 1
+        elif n_panels == 3:
+            ncols, nrows = 3, 1
+        elif n_panels == 4:
+            ncols, nrows = 2, 2
+        elif n_panels <= 6:
+            ncols, nrows = 3, 2
+        else:
+            ncols, nrows = 4, 3
+
+        # Auto figsize
+        if figsize is None:
+            figsize = (ncols * 5, nrows * 4)
+
+        fig, axes = plt.subplots(nrows, ncols, figsize=figsize,
+                                sharex=sharex, sharey=sharey)
+        if n_panels == 1:
+            axes = [axes]
+        else:
+            axes = axes.flatten() if nrows * ncols > 1 else [axes]
+
+        for idx, ((omega, rho), title) in enumerate(zip(dos_list, titles)):
+            ax = axes[idx]
+
+            omega_np = omega.cpu().numpy() if hasattr(omega, 'cpu') else omega.numpy()
+            rho_np = rho.cpu().numpy() if hasattr(rho, 'cpu') else rho.numpy()
+
+            ax.plot(omega_np, rho_np, **kwargs)
+            ax.set_xlabel(xlabel, fontsize=DEFAULT_FONTSIZES['labels'])
+            ax.set_ylabel(ylabel, fontsize=DEFAULT_FONTSIZES['labels'])
+            ax.set_title(title, fontsize=DEFAULT_FONTSIZES['titles'])
+            ax.grid(True, alpha=DEFAULT_STYLING['grid_alpha'])
+
+            if energy_range is not None:
+                ax.set_xlim(energy_range)
+
+        # Hide unused subplots
+        for idx in range(n_panels, len(axes)):
+            axes[idx].set_visible(False)
+
+        fig.tight_layout()
+
+        return tuple(axes[:n_panels])
 
 
 class ProjectedDOS(DOSCalculator):
