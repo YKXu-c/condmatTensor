@@ -18,7 +18,7 @@ condmatTensor is a PyTorch-based condensed matter physics library for quantum ma
 
 ```
 LEVEL 1: Core      → BaseTensor, get_device() ✅
-LEVEL 2: Lattice   → BravaisLattice, TightBindingModel ✅
+LEVEL 2: Lattice   → BravaisLattice, HoppingModel ✅
 LEVEL 3: Solvers   → diagonalize() (ED, IPT not implemented) ⚠️
 LEVEL 4: Many-Body → BareGreensFunction, SelfEnergy (DMFT loops not implemented) ⚠️
 LEVEL 5: Analysis  → DOSCalculator, BandStructure (topology, QGT not implemented) ⚠️
@@ -123,7 +123,7 @@ from condmatTensor.core import BaseTensor, get_device
 ```python
 from condmatTensor.lattice import (
     BravaisLattice,
-    TightBindingModel,
+    HoppingModel,
     generate_kmesh,
     generate_k_path
 )

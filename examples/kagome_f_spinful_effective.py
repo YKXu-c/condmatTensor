@@ -34,7 +34,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from condmatTensor.core import BaseTensor, get_device
-from condmatTensor.lattice import BravaisLattice, TightBindingModel, generate_k_path
+from condmatTensor.lattice import BravaisLattice, HoppingModel, generate_k_path
 from condmatTensor.solvers import diagonalize
 from condmatTensor.analysis import BandStructure, DOSCalculator
 from condmatTensor.optimization import EffectiveArrayOptimizer

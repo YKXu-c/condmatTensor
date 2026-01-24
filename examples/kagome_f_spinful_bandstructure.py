@@ -36,7 +36,7 @@ import torch
 import matplotlib.pyplot as plt
 
 from condmatTensor.core import BaseTensor
-from condmatTensor.lattice import BravaisLattice, TightBindingModel, generate_k_path
+from condmatTensor.lattice import BravaisLattice, HoppingModel, generate_k_path
 from condmatTensor.solvers import diagonalize
 from condmatTensor.analysis import BandStructure
 from condmatTensor.manybody import LocalMagneticModel
@@ -46,7 +46,7 @@ def build_kagome_f_spinful_lattice(
     t: float = -1.0,
     t_f: float = -0.5,
     epsilon_f: float = 0.0,
-) -> tuple[BravaisLattice, TightBindingModel]:
+) -> tuple[BravaisLattice, HoppingModel]:
     """
     Build Kagome-F lattice with spinful orbitals.
 
@@ -74,7 +74,7 @@ def build_kagome_f_spinful_lattice(
         torch.tensor([1/3, 1/3]),      # Site f (center of triangle)
     ]
 
-    # Note: BravaisLattice doesn't take orbital_labels - set in TightBindingModel
+    # Note: BravaisLattice doesn't take orbital_labels - set in HoppingModel
     # For spinful case: 4 sites × 2 spin (up/down) = 8 orbitals total
     # num_orbitals is now a list: [2, 2, 2, 2] for 4 sites, each with 2 spin orbitals
     lattice = BravaisLattice(
@@ -90,7 +90,7 @@ def build_kagome_f_spinful_lattice(
         "C_up", "C_down",
         "f_up", "f_down",
     ]
-    tb_model = TightBindingModel(lattice, orbital_labels=orbital_labels)
+    tb_model = HoppingModel(lattice, orbital_labels=orbital_labels)
 
     # Kagome-Kagome hopping (spin-conserving)
     # Must match the spinless case in kagome_with_f_bandstructure.py and kagome_bandstructure.py

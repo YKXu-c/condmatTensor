@@ -25,7 +25,7 @@ import torch
 import matplotlib.pyplot as plt
 
 from condmatTensor.core import BaseTensor
-from condmatTensor.lattice import BravaisLattice, TightBindingModel, generate_k_path, generate_kmesh
+from condmatTensor.lattice import BravaisLattice, HoppingModel, generate_k_path, generate_kmesh
 from condmatTensor.solvers import diagonalize
 from condmatTensor.analysis import BandStructure, DOSCalculator
 from condmatTensor.manybody import SpectralFunction
@@ -262,9 +262,9 @@ def main():
     print("METHOD 2: TightBindingModel.build_Hk (same hoppings as Method 1)")
     print("=" * 70)
 
-    print("\n3b. Creating TightBindingModel with Kagome hoppings...")
+    print("\n3b. Creating HoppingModel with Kagome hoppings...")
     # Use the analytic hopping structure directly in k-space form
-    tb_model = TightBindingModel(lattice, orbital_labels=["A", "B", "C"])
+    tb_model = HoppingModel(lattice, orbital_labels=["A", "B", "C"])
 
     # Use add_hermitian=False to match analytic structure exactly
     # IMPORTANT: Use hopping value = -t to match the analytic formula H = -t * M
@@ -349,9 +349,9 @@ def main():
     diff_direct_fourier = torch.max(torch.abs(eigenvalues_direct - eigenvalues_fourier)).item()
     diff_tb_fourier = torch.max(torch.abs(eigenvalues_tb - eigenvalues_fourier)).item()
 
-    print(f"\n   Max difference (Direct vs TightBindingModel):  {diff_direct_tb:.2e}")
+    print(f"\n   Max difference (Direct vs HoppingModel):  {diff_direct_tb:.2e}")
     print(f"   Max difference (Direct vs Fourier):            {diff_direct_fourier:.2e}")
-    print(f"   Max difference (TightBindingModel vs Fourier): {diff_tb_fourier:.2e}")
+    print(f"   Max difference (HoppingModel vs Fourier): {diff_tb_fourier:.2e}")
 
     if diff_direct_tb < 1e-6 and diff_direct_fourier < 1e-6:
         print("\n   ✓ All methods agree! (difference < 1e-6)")
@@ -375,7 +375,7 @@ def main():
     # Method 2: TightBindingModel
     bs2 = BandStructure()
     bs2.compute(eigenvalues_tb, k_path, ticks)
-    bs2.plot(ax=axes[1], ylabel="Energy ($|t|$)", title="Method 2: TightBindingModel.build_Hk")
+    bs2.plot(ax=axes[1], ylabel="Energy ($|t|$)", title="Method 2: HoppingModel.build_Hk")
 
     # Method 3: Fourier from H(R)
     bs3 = BandStructure()

@@ -410,14 +410,14 @@ print(lattice.reciprocal_vectors())  # Reciprocal lattice vectors
 
 ---
 
-#### `TightBindingModel`
+#### `HoppingModel`
 
 Build tight-binding models from symbolic hopping terms.
 
 **File**: `lattice/model.py:7-220`
 
 ```python
-TightBindingModel(lattice, orbital_labels=None, hoppings=None)
+HoppingModel(lattice, orbital_labels=None, hoppings=None)
 ```
 
 **Parameters**:
@@ -436,7 +436,7 @@ TightBindingModel(lattice, orbital_labels=None, hoppings=None)
 
 **Example**:
 ```python
-from condmatTensor.lattice import BravaisLattice, TightBindingModel
+from condmatTensor.lattice import BravaisLattice, HoppingModel
 import torch
 
 # Create Kagome lattice
@@ -449,7 +449,7 @@ basis_positions = [(0, 0), (0.5, 0), (0.25, 0.25)]
 lattice = BravaisLattice(cell_vectors, basis_positions, [1, 1, 1])
 
 # Build tight-binding model
-model = TightBindingModel(lattice, orbital_labels=['A', 'B', 'C'])
+model = HoppingModel(lattice, orbital_labels=['A', 'B', 'C'])
 model.add_hopping('A', 'B', [0, 0], 1.0)  # Nearest neighbor
 model.add_hopping('B', 'C', [0, 0], 1.0)
 model.add_hopping('C', 'A', [0, 0], 1.0)
@@ -571,12 +571,12 @@ diagonalize(Hk, hermitian=True)
 
 **Example**:
 ```python
-from condmatTensor.lattice import BravaisLattice, TightBindingModel, generate_k_path
+from condmatTensor.lattice import BravaisLattice, HoppingModel, generate_k_path
 from condmatTensor.solvers import diagonalize
 
 # Build model
 lattice = BravaisLattice(...)
-model = TightBindingModel(lattice)
+model = HoppingModel(lattice)
 model.add_hopping('A', 'B', [0, 0], 1.0)
 
 # Generate k-path and diagonalize
@@ -1143,7 +1143,7 @@ from condmatTensor.core import BaseTensor, OrbitalMetadata, get_device
 # LEVEL 2: Lattice
 from condmatTensor.lattice import (
     BravaisLattice,
-    TightBindingModel,
+    HoppingModel,
     generate_kmesh,
     generate_k_path
 )
@@ -1187,7 +1187,7 @@ from condmatTensor.optimization import (
 ```python
 import torch
 from condmatTensor.core import get_device
-from condmatTensor.lattice import BravaisLattice, TightBindingModel, generate_k_path
+from condmatTensor.lattice import BravaisLattice, HoppingModel, generate_k_path
 from condmatTensor.solvers import diagonalize
 from condmatTensor.analysis import BandStructure, DOSCalculator
 
@@ -1204,7 +1204,7 @@ basis_positions = [(0, 0), (0.5, 0), (0.25, 0.25)]
 lattice = BravaisLattice(cell_vectors, basis_positions, [1, 1, 1])
 
 # Build tight-binding model
-model = TightBindingModel(lattice, orbital_labels=['A', 'B', 'C'])
+model = HoppingModel(lattice, orbital_labels=['A', 'B', 'C'])
 model.add_hopping('A', 'B', [0, 0], 1.0)
 model.add_hopping('B', 'C', [0, 0], 1.0)
 model.add_hopping('C', 'A', [0, 0], 1.0)

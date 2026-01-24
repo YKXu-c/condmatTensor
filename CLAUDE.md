@@ -99,7 +99,7 @@ pip install -r requirements.txt
 | Level | Module | Status | Key Classes |
 |-------|--------|--------|-------------|
 | **1** | Core | ✅ Complete | `BaseTensor`, `get_device()` |
-| **2** | Lattice | ✅ Complete | `BravaisLattice`, `TightBindingModel`, `generate_kmesh`, `generate_k_path` |
+| **2** | Lattice | ✅ Complete | `BravaisLattice`, `HoppingModel`, `generate_kmesh`, `generate_k_path` |
 | **3** | Solvers | ⚠️ Partial | `diagonalize()` (ED, IPT not implemented) |
 | **4** | Many-Body | ⚠️ Partial | `BareGreensFunction`, `SelfEnergy`, `SpectralFunction`, `KondoLatticeSolver` (DMFT loops not implemented) |
 | **5** | Analysis | ⚠️ Partial | `DOSCalculator`, `ProjectedDOS`, `BandStructure` (topology, QGT not implemented) |
@@ -205,7 +205,7 @@ from condmatTensor.core import BaseTensor, get_device
 # LEVEL 2: Lattice
 from condmatTensor.lattice import (
     BravaisLattice,
-    TightBindingModel,
+    HoppingModel,
     generate_kmesh,
     generate_k_path
 )
@@ -347,12 +347,12 @@ The `examples/` directory demonstrates and validates core physics:
 
 ### Band Structure Calculation
 ```python
-from condmatTensor.lattice import BravaisLattice, TightBindingModel, generate_k_path
+from condmatTensor.lattice import BravaisLattice, HoppingModel, generate_k_path
 from condmatTensor.solvers import diagonalize
 from condmatTensor.analysis import BandStructure
 
 lattice = BravaisLattice(cell_vectors, basis_positions, num_orbitals)
-model = TightBindingModel(lattice, orbital_labels=['A', 'B', 'C'])
+model = HoppingModel(lattice, orbital_labels=['A', 'B', 'C'])
 model.add_hopping('A', 'B', [0, 0], 1.0)
 
 k_path, labels = generate_k_path(lattice, ['G', 'K', 'M', 'G'], n_k=100)

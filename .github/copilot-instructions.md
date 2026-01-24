@@ -18,7 +18,7 @@ condmatTensor is a PyTorch-based condensed matter physics library for quantum ma
 
 ```
 LEVEL 1: Core      → BaseTensor, get_device() ✅
-LEVEL 2: Lattice   → BravaisLattice, TightBindingModel ✅
+LEVEL 2: Lattice   → BravaisLattice, HoppingModel ✅
 LEVEL 3: Solvers   → diagonalize() (ED, IPT not implemented) ⚠️
 LEVEL 4: Many-Body → BareGreensFunction, SelfEnergy (DMFT loops not implemented) ⚠️
 LEVEL 5: Analysis  → DOSCalculator, BandStructure (topology, QGT not implemented) ⚠️
@@ -237,7 +237,7 @@ from condmatTensor.core import BaseTensor, get_device
 
 # LEVEL 2: Lattice
 from condmatTensor.lattice import (
-    BravaisLattice, TightBindingModel, generate_kmesh, generate_k_path
+    BravaisLattice, HoppingModel, generate_kmesh, generate_k_path
 )
 
 # LEVEL 3: Solvers
@@ -262,12 +262,12 @@ from condmatTensor.optimization import BayesianOptimizer, EffectiveArrayOptimize
 
 ### Band Structure Calculation
 ```python
-from condmatTensor.lattice import BravaisLattice, TightBindingModel, generate_k_path
+from condmatTensor.lattice import BravaisLattice, HoppingModel, generate_k_path
 from condmatTensor.solvers import diagonalize
 from condmatTensor.analysis import BandStructure
 
 lattice = BravaisLattice(cell_vectors, basis_positions, num_orbitals)
-model = TightBindingModel(lattice, orbital_labels=['A', 'B', 'C'])
+model = HoppingModel(lattice, orbital_labels=['A', 'B', 'C'])
 model.add_hopping('A', 'B', [0, 0], 1.0)
 
 k_path, labels = generate_k_path(lattice, ['G', 'K', 'M', 'G'], n_k=100)

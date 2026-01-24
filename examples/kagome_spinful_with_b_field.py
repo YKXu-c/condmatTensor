@@ -33,13 +33,13 @@ import torch
 import matplotlib.pyplot as plt
 
 from condmatTensor.core import BaseTensor
-from condmatTensor.lattice import BravaisLattice, TightBindingModel, generate_k_path
+from condmatTensor.lattice import BravaisLattice, HoppingModel, generate_k_path
 from condmatTensor.solvers import diagonalize
 from condmatTensor.analysis import BandStructure
 from condmatTensor.manybody import LocalMagneticModel
 
 
-def build_kagome_spinful_lattice(t: float = -1.0) -> tuple[BravaisLattice, TightBindingModel]:
+def build_kagome_spinful_lattice(t: float = -1.0) -> tuple[BravaisLattice, HoppingModel]:
     """Build Kagome lattice with spinful s-orbitals."""
     import math
 
@@ -56,7 +56,7 @@ def build_kagome_spinful_lattice(t: float = -1.0) -> tuple[BravaisLattice, Tight
         torch.tensor([0.25, sqrt3 / 4]),
     ]
 
-    # Note: BravaisLattice doesn't take orbital_labels - set in TightBindingModel
+    # Note: BravaisLattice doesn't take orbital_labels - set in HoppingModel
     # For spinful case: 3 sites × 2 spin (up/down) = 6 orbitals total
     # num_orbitals is now a list: [2, 2, 2] for 3 sites, each with 2 spin orbitals
     lattice = BravaisLattice(
@@ -71,7 +71,7 @@ def build_kagome_spinful_lattice(t: float = -1.0) -> tuple[BravaisLattice, Tight
         "B_up", "B_down",
         "C_up", "C_down",
     ]
-    tb_model = TightBindingModel(lattice, orbital_labels=orbital_labels)
+    tb_model = HoppingModel(lattice, orbital_labels=orbital_labels)
 
     # Nearest-neighbor hopping (spin-conserving)
     # Must match the spinless case in kagome_bandstructure.py

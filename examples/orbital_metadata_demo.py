@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Orbital Metadata System Demonstration.
 
 This script demonstrates the new orbital metadata system for BaseTensor,
@@ -15,7 +16,7 @@ Features demonstrated:
 
 import torch
 from condmatTensor.core import BaseTensor, OrbitalMetadata, get_device
-from condmatTensor.lattice import BravaisLattice, TightBindingModel, generate_k_path
+from condmatTensor.lattice import BravaisLattice, HoppingModel, generate_k_path
 
 
 def demo_string_format():
