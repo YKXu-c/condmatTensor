@@ -6,7 +6,7 @@ import torch
 
 class HoppingModel:
     """
-    General hopping model builder.
+    General hopping model builder. !!!A Builder!!!
 
     Reads symbolic hopping terms and constructs H(R) and H(k).
     Each hopping term is: (orb_i, orb_j, displacement, hopping_value)
