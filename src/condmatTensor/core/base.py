@@ -206,6 +206,20 @@ class BaseTensor:
 
         return None
 
+    @orbital_metadatas.setter
+    def orbital_metadatas(self, value: Optional[List["OrbitalMetadataLike"]]) -> None:
+        """Set orbital metadata list.
+
+        Args:
+            value: List of OrbitalMetadata objects, dicts, or strings
+        """
+        if value is None:
+            self._orbital_metadatas = None
+            self.orbital_names = None
+        else:
+            self._orbital_metadatas = self._normalize_metadatas(value)
+            self.orbital_names = [md.to_string() for md in self._orbital_metadatas]
+
     def get_f_orbitals(self) -> List[int]:
         """Get indices of f-orbitals.
 

@@ -2,7 +2,15 @@
 
 **Version**: 0.0.1
 **License**: MIT
-**Implementation Status**: ~45% complete (5 of 10 levels partially/fully implemented, ~5,900 lines)
+**Implementation Status**: ~50% complete (5 of 10 levels partially/fully implemented, ~7,500 lines)
+**Recent Updates (2026-02-03)**:
+- DMFT loop + IPT impurity solver with ABC architecture
+- **CRITICAL BUG FIXES**: IPT now correctly uses G₀ (Weiss field) instead of G_loc, added 1/β FFT normalization, fermionic boundary condition enforcement
+- Pade analytic continuation implementation with modular class-based framework
+- Auto-calculated DOS range for interacting systems
+- DMFT example validation with 11 plots (including Im[G(iωₙ)] for TRIQS-style validation, U-scan 3x3 grid, and vertical DOS stack)
+- **t_f parameter scan**: f-f hopping/f-d hybridization scan (-0.1 to -1.0) with organized output directories
+- **Pade simple test example**: Standalone test for analytic continuation without DMFT (5 test cases, 5 plots)
 
 ---
 
@@ -591,9 +599,9 @@ print(evals.shape)  # (150, 3) - (N_k, N_orb)
 
 ## LEVEL 4: Many-Body
 
-**Status**: ⚠️ Partial (DMFT loops not implemented)
+**Status**: ⚠️ Partial (DMFT loop + IPT implemented, ED/NRG/CTQMC pending, analytic continuation framework added)
 **Path**: `src/condmatTensor/manybody/`
-**Files**: `preprocessing.py` (496 lines), `magnetic.py` (840 lines)
+**Files**: `preprocessing.py` (627 lines), `analytic_continuation.py` (430 lines), `magnetic.py` (840 lines), `impSolvers/base.py` (90 lines), `impSolvers/ipt.py` (310 lines), `dmft.py` (416 lines)
 
 ### Functions
 
@@ -601,7 +609,7 @@ print(evals.shape)  # (150, 3) - (N_k, N_orb)
 
 Generate Matsubara frequency grid.
 
-**File**: `manybody/preprocessing.py:17-53`
+**File**: `manybody/preprocessing.py:17-85`
 
 ```python
 generate_matsubara_frequencies(beta, n_max, fermionic=True, device=None)
@@ -616,6 +624,12 @@ generate_matsubara_frequencies(beta, n_max, fermionic=True, device=None)
 **Returns**:
 - `torch.Tensor`: Shape (2*n_max + 1,) - Matsubara frequencies
 
+**Indexing Scheme**:
+- Frequencies indexed from n = -n_max to n = +n_max (NOT from 0!)
+- For n_max=2: indices are [-2, -1, 0, 1, 2]
+- The "zero" index (n=0) does NOT mean zero frequency (iω₀ = iπ/β)
+- For plotting, use `torch.arange(len(omega))` for x-axis labels
+
 **Formula**:
 - Fermionic: iωₙ = iπ(2n + 1)/β
 - Bosonic: iωₙ = iπ(2n)/β
@@ -628,6 +642,55 @@ beta = 10.0  # T = 0.1
 n_max = 100
 omega = generate_matsubara_frequencies(beta, n_max)
 print(omega.shape)  # (201,)
+
+# For plotting: iwn_vals is just for x-axis labels
+iwn_vals = torch.arange(len(omega))  # [0, 1, 2, ..., 200]
+# The actual frequencies are omega[iwn_vals] = iπ(2n+1)/β
+```
+
+---
+
+#### `calculate_dos_range()`
+
+Auto-calculate DOS range for interacting systems.
+
+**File**: `manybody/preprocessing.py:88-125`
+
+```python
+calculate_dos_range(evals_min, evals_max, sigma_shift, U_max, margin=2.0)
+```
+
+**Parameters**:
+- `evals_min` (float): Minimum eigenvalue from band structure
+- `evals_max` (float): Maximum eigenvalue from band structure
+- `sigma_shift` (float): Maximum |Re[Σ]| from self-energy
+- `U_max` (float): Maximum Hubbard U value
+- `margin` (float, optional): Additional safety margin (default: 2.0)
+
+**Returns**:
+- `tuple[float, float]`: (omega_min, omega_max) - Energy range for DOS calculation
+
+**Formula**:
+```
+width = (evals_max - evals_min) + 2 * sigma_shift + U_max
+center = (evals_min + evals_max) / 2
+omega_min = center - width / 2 - margin
+omega_max = center + width / 2 + margin
+```
+
+**Example**:
+```python
+from condmatTensor.manybody import calculate_dos_range
+
+evals_min, evals_max = -3.0, 5.0  # Kagome-F bands
+sigma_shift = 1.5  # From self-energy
+U_max = 4.0  # Hubbard U on f-orbital
+
+omega_min, omega_max = calculate_dos_range(
+    evals_min, evals_max, sigma_shift, U_max
+)
+print(f"DOS range: [{omega_min:.1f}, {omega_max:.1f}]")
+# Output: DOS range: [-12.5, 14.5]
 ```
 
 ---
@@ -727,7 +790,7 @@ Sigma_tensor = Sigma.initialize_zero(omega, n_orb=6)
 
 Spectral function A(ω) from Green's function.
 
-**File**: `manybody/preprocessing.py:242-497`
+**File**: `manybody/preprocessing.py:242-627`
 
 ```python
 SpectralFunction()
@@ -738,21 +801,186 @@ SpectralFunction()
 | Method | Description |
 |--------|-------------|
 | `from_eigenvalues(eigenvalues, omega, eta=0.02, device=None)` | Compute from eigenvalues |
-| `from_matsubara(G_iwn, omega, eta=0.02, method='simple', device=None)` | Compute from Matsubara |
+| `from_matsubara(G_iwn, omega, eta=0.02, method='simple', device=None, beta=None, n_min=0, n_max=None)` | Compute from Matsubara |
 | `compute_dos(A=None)` | Compute total DOS |
 | `plot(ax=None, orbital=-1, **kwargs)` | Plot spectral function |
 
-**Note**: Pade analytic continuation (`method='pade'`) is not yet implemented.
+**Analytic Continuation Methods**:
+- `method='simple'`: Direct substitution iωₙ → ω + iη (fast, approximate)
+- `method='pade'`: Padé approximant with Vidberg-Serene algorithm (accurate)
+- `method='bethe'`: Bethe lattice analytical solution (semi-elliptical DOS)
+- `method='maxent'`: Maximum entropy (NOT YET IMPLEMENTED)
+
+**Pade Parameters** (when `method='pade'`):
+- `beta` (float, required): Inverse temperature
+- `n_min` (int): Minimum Matsubara index (default: 0)
+- `n_max` (int, optional): Maximum Matsubara index (default: N//2)
+
+**Bethe Parameters** (when `method='bethe'`):
+- `z` (float, optional): Coordination number (auto-detected from lattice if None)
+- `t` (float, optional): Hopping parameter (default: 1.0)
+- `lattice` (BravaisLattice, optional): For auto-detecting coordination number
+
+**Reference**: Vidberg H.J. and Serene J.W., J. Low Temp. Phys. 29, 179 (1977)
 
 **Example**:
 ```python
 from condmatTensor.manybody.preprocessing import SpectralFunction
 import torch
 
+# Non-interacting spectral function
 omega = torch.linspace(-3, 3, 1000)
 spectral = SpectralFunction()
-A = spectral.from_eigenvalues(evals, omega, eta=0.02)
-dos = spectral.compute_dos(A)
+A_nonint = spectral.from_eigenvalues(evals, omega, eta=0.02)
+dos_nonint = spectral.compute_dos(A_nonint)
+
+# Interacting spectral function with Pade continuation
+A_int = spectral.from_matsubara(
+    G_iwn, omega, eta=0.05, method='pade',
+    beta=10.0, n_min=0, n_max=32
+)
+dos_int = spectral.compute_dos(A_int)
+
+# Bethe lattice semi-elliptical DOS
+A_bethe = spectral.from_matsubara(
+    G_iwn, omega, eta=0.05, method='bethe',
+    z=6.0, t=1.0
+)
+```
+
+---
+
+#### `AnalyticContinuationMethod`
+
+Abstract base class for analytic continuation methods.
+
+**File**: `manybody/analytic_continuation.py:1-50`
+
+```python
+class AnalyticContinuationMethod(ABC)
+```
+
+**Abstract Methods**:
+
+| Method | Description |
+|--------|-------------|
+| `continue_to_real_axis(G_iwn, omega, eta, **kwargs)` | Transform G(iωₙ) → G(ω + iη), return A(ω) |
+
+**Purpose**: Provides modular interface for different analytic continuation methods.
+
+**Implementations**:
+- `SimpleContinuation`: Direct substitution (fast, approximate)
+- `PadeContinuation`: Padé approximant (accurate)
+- `BetheLatticeContinuation`: Semi-elliptical DOS (testing)
+- `MaxEntContinuation`: Maximum entropy (future, raises NotImplementedError)
+
+---
+
+#### `SimpleContinuation`
+
+Direct substitution iωₙ → ω + iη (fast, approximate).
+
+**File**: `manybody/analytic_continuation.py:51-130`
+
+```python
+SimpleContinuation()
+```
+
+**Methods**:
+- `continue_to_real_axis(G_iwn, omega, eta=0.05, **kwargs)` → A(ω)
+
+**Warning**: Only valid for very smooth functions. Fails for systems with sharp spectral features. Use with caution!
+
+---
+
+#### `PadeContinuation`
+
+Padé approximant (Vidberg-Serene continued fraction).
+
+**File**: `manybody/analytic_continuation.py:131-270`
+
+```python
+PadeContinuation()
+```
+
+**Methods**:
+- `continue_to_real_axis(G_iwn, omega, eta=0.05, beta=10.0, n_min=0, n_max=None, **kwargs)` → A(ω)
+
+**Algorithm**:
+```
+C_M(z) = a₀ / (1 + a₁(z-z₀) / (1 + a₂(z-z₁) / (...)))
+```
+
+**Reference**: Vidberg H.J. and Serene J.W., J. Low Temp. Phys. 29, 179 (1977)
+
+---
+
+#### `BetheLatticeContinuation`
+
+Bethe lattice analytical solution for semi-elliptical DOS.
+
+**File**: `manybody/analytic_continuation.py:271-370`
+
+```python
+BetheLatticeContinuation()
+```
+
+**Methods**:
+- `continue_to_real_axis(G_iwn, omega, eta=0.05, z=None, t=1.0, lattice=None, **kwargs)` → A(ω)
+
+**Formula**:
+```
+G₀(ω) = 2(z-1)/t² [ω + t²/(2(z-1)) - sqrt((ω + t²/(2(z-1)))² - 4)]
+```
+
+**Use Case**: Testing DMFT implementations where lattice problem can be solved analytically.
+
+---
+
+#### `MaxEntContinuation`
+
+Maximum entropy analytic continuation (NOT YET IMPLEMENTED).
+
+**File**: `manybody/analytic_continuation.py:371-400`
+
+```python
+MaxEntContinuation()
+```
+
+**Note**: Raises NotImplementedError. Consider using MaxEnt package or TRIQS for MaxEnt continuation.
+
+---
+
+#### `create_continuation_method()`
+
+Factory function for creating analytic continuation methods.
+
+**File**: `manybody/analytic_continuation.py:403-430`
+
+```python
+create_continuation_method(method)
+```
+
+**Parameters**:
+- `method` (str): Method name ('simple', 'pade', 'bethe', 'maxent')
+
+**Returns**:
+- `AnalyticContinuationMethod`: Instance of the corresponding method
+
+**Raises**:
+- `ValueError`: If method name is unknown
+
+**Example**:
+```python
+from condmatTensor.manybody.analytic_continuation import create_continuation_method
+
+# Create method instances
+pade = create_continuation_method('pade')
+bethe = create_continuation_method('bethe')
+
+# Use the methods
+A_pade = pade.continue_to_real_axis(G_iwn, omega, eta=0.05, beta=10.0)
+A_bethe = bethe.continue_to_real_axis(G_iwn, omega, eta=0.05, z=6.0)
 ```
 
 ---
@@ -830,6 +1058,189 @@ SpinFermionModel(H0=None, J_tensor=None, S_init=None)
 
 ---
 
+#### `ImpuritySolverABC`
+
+Abstract base class for DMFT impurity solvers.
+
+**File**: `manybody/impSolvers/base.py:1-90`
+
+```python
+class ImpuritySolverABC(ABC)
+```
+
+**Abstract Methods**:
+
+| Method | Description |
+|--------|-------------|
+| `solve(G_input, **kwargs)` | Solve impurity problem, return Σ |
+| `solver_name` (property) | Return solver name string |
+| `supported_orbitals` (property) | Return max orbitals (-1=unlimited) |
+
+**Purpose**: Enables polymorphic use of different impurity solvers (IPT, ED, NRG, CTQMC) in DMFT loop.
+
+**Example**:
+```python
+from condmatTensor.manybody import IPTSolver, ImpuritySolverABC
+
+solver = IPTSolver(beta=10.0, n_max=100)
+assert isinstance(solver, ImpuritySolverABC)  # Type checking
+Sigma = solver.solve(G_input)
+```
+
+---
+
+#### `IPTSolver`
+
+Iterated Perturbation Theory solver for DMFT (second-order).
+
+**File**: `manybody/impSolvers/ipt.py:1-420`
+
+```python
+IPTSolver(beta, n_max=100, device=None)
+```
+
+**Parameters**:
+- `beta` (float): Inverse temperature
+- `n_max` (int): Maximum Matsubara frequency index
+- `device` (torch.device, optional): Device for computation
+
+**Methods**:
+
+| Method | Description |
+|--------|-------------|
+| `solve(G_input, max_iter=1, tol=1e-6, **kwargs)` | Compute Σ using TRIQS formula |
+| `_validate_self_energy(Sigma, U_orb)` | Validate Σ against physical constraints (internal) |
+| `solver_name` (property) | Returns "IPT" |
+| `supported_orbitals` (property) | Returns -1 (unlimited) |
+| `G_loc` (property) | Local G from last solve() |
+| `Sigma` (property) | Σ from last solve() |
+
+**Formula** (TRIQS-style imaginary time):
+```
+Σ(τ) = U² · G₀(τ)³
+Σ(iωₙ) = F[Σ(τ)]
+```
+
+**Matsubara Frequency Transforms**:
+The solver uses proper fermionic Matsubara frequency transforms (not generic PyTorch FFT):
+
+```
+G(iωₙ) = (1/β) ∫₀^β dτ e^(iωₙτ) G(τ)  ← Fourier transform
+G(τ) = (1/β) Σₙ e^(-iωₙτ) G(iωₙ)      ← Inverse Fourier transform
+where ωₙ = π(2n+1)/β (fermionic Matsubara frequencies)
+```
+
+**Numerical Stabilization**:
+- Adaptive clipping: `g_clip = max(3.0, 10.0 / U_orb[i])`
+- For U=4, clip=3 gives max Σ ~ 16 × 27 = 432
+- For U=2, clip=5 gives max Σ ~ 4 × 125 = 500
+- Complex G(τ) preserved: clips magnitude but keeps phase
+
+**Self-Energy Validation**:
+The `_validate_self_energy()` method checks:
+1. High-frequency limit: Σ(iωₙ) → U²n/β as ωₙ → ∞
+2. Magnitude should be O(1) to O(100) for typical U values
+3. Orbital selectivity: Σ_f >> Σ_d for U_f >> U_d
+
+**Orbital-dependent U**: Read from `OrbitalMetadata.U`
+- U_d ≈ 0-1 (conductive d-orbitals)
+- U_f ≈ 4-8 (localized f-orbitals)
+- For U_f = 4.0, expected |Im Σ_f(iω₀)| ~ O(10) to O(200)
+- For U_f = 2.0, expected |Im Σ_f(iω₀)| ~ O(1) to O(50)
+
+**Example**:
+```python
+from condmatTensor.manybody import IPTSolver
+from condmatTensor.core.types import OrbitalMetadata
+
+# Create solver with orbital-dependent U
+solver = IPTSolver(beta=10.0, n_max=64)
+G_input.orbital_metadatas = [
+    OrbitalMetadata(site='K1', orb='d', local=False, U=0.5),
+    OrbitalMetadata(site='F', orb='f', local=True, U=4.0),
+]
+Sigma = solver.solve(G_input)
+```
+
+---
+
+#### `SingleSiteDMFTLoop`
+
+DMFT self-consistency loop with polymorphic impurity solver support.
+
+**File**: `manybody/dmft.py:1-400`
+
+```python
+SingleSiteDMFTLoop(Hk, omega, solver, mu=0.0, mixing=0.5, verbose=True)
+```
+
+**Parameters**:
+- `Hk` (BaseTensor): k-space Hamiltonian, labels=['k', 'orb_i', 'orb_j']
+- `omega` (torch.Tensor): Matsubara frequency grid
+- `solver` (ImpuritySolverABC): Impurity solver (IPT, ED, NRG, etc.)
+- `mu` (float): Chemical potential (default: 0.0)
+- `mixing` (float or MixingMethod): Mixing parameter (0 < mixing <= 1)
+- `verbose` (bool): Print iteration progress
+
+**Methods**:
+
+| Method | Description |
+|--------|-------------|
+| `run(max_iter=100, tol=1e-6, Sigma_init=None)` | Run DMFT loop |
+| `Sigma` (property) | Final converged self-energy |
+| `G_loc` (property) | Final local Green's function |
+| `G0` (property) | Final Weiss field |
+| `n_iterations` (property) | Iterations to converge |
+| `get_convergence_history()` | Dict with 'Sigma_diff', 'Sigma_norm' |
+
+**DMFT Algorithm (7 steps)**:
+1. Start with Σ = 0 (non-interacting)
+2. Compute G(k,iω) = [iω+μ-H(k)-Σ]⁻¹
+3. Extract G_loc = (1/N_k) Σ_k G(k,iω)
+4. Compute Weiss field: G₀⁻¹ = G_loc⁻¹ + Σ
+5. Solve impurity: Σ_new = solver.solve(G₀)
+6. Mix: Σ = (1-α)·Σ_old + α·Σ_new
+7. Check convergence: |ΔΣ|/|Σ| < tol
+
+**Example**:
+```python
+from condmatTensor.manybody import IPTSolver, SingleSiteDMFTLoop
+from condmatTensor.manybody.preprocessing import generate_matsubara_frequencies
+
+# Setup
+omega = generate_matsubara_frequencies(beta=10.0, n_max=64)
+solver = IPTSolver(beta=10.0, n_max=64)
+dmft = SingleSiteDMFTLoop(Hk_mesh, omega, solver, mixing=0.5)
+
+# Run
+Sigma = dmft.run(max_iter=50, tol=1e-5)
+print(f"Converged in {dmft.n_iterations} iterations")
+```
+
+---
+
+#### `MixingMethod` / `LinearMixing`
+
+Mixing strategies for self-energy updates.
+
+**File**: `manybody/dmft.py:25-80`
+
+```python
+LinearMixing(alpha=0.5)
+```
+
+**Parameters**:
+- `alpha` (float): Mixing parameter (0 < alpha <= 1)
+
+**Formula**:
+```
+Σ_mixed = (1-α)·Σ_old + α·Σ_new
+```
+
+**Future**: AndersonMixing, BayesianMixing (via LEVEL 7 optimization)
+
+---
+
 ## LEVEL 5: Analysis
 
 **Status**: ⚠️ Partial (Topology, QGT not implemented)
@@ -873,7 +1284,7 @@ ax.plot(x, y, color=DEFAULT_COLORS['primary'])
 
 Density of States calculator with Lorentzian broadening.
 
-**File**: `analysis/dos.py:25-361`
+**File**: `analysis/dos.py:28-602`
 
 ```python
 DOSCalculator()
@@ -885,6 +1296,7 @@ DOSCalculator()
 |--------|-------------|
 | `from_eigenvalues(E_k, omega, eta=0.02)` | Compute DOS from eigenvalues |
 | `from_spectral_function(A, omega)` | Compute DOS from spectral function |
+| `from_matsubara_pade(G_iwn, omega, eta=0.05, beta=None, n_min=0, n_max=None)` | Compute DOS from Matsubara G using Pade |
 | `plot(ax=None, energy_range=None, ylabel, xlabel, title, fontsize=12, fill=True, **kwargs)` | Plot DOS |
 | `plot_with_reference(reference_energies, labels=None, colors=None, linestyles=None, ax=None, energy_range=None, ylabel, xlabel, title, fontsize=12, legend=True, **kwargs)` | Plot DOS with vertical reference lines |
 | `plot_comparison(other_dos_data, labels, colors=None, alpha=0.7, ax=None, energy_range=None, ylabel, xlabel, title, fontsize=12, linewidth=1.5, legend=True, fill=False, **kwargs)` | Overlay multiple DOS curves |
@@ -892,6 +1304,14 @@ DOSCalculator()
 
 **Formula**:
 DOS(ω) = Σ_k (1/π) * η / [(ω - E_k)² + η²]
+
+**Pade Parameters** (for `from_matsubara_pade`):
+- `G_iwn`: Green's function on Matsubara frequencies (labels=['iwn', 'orb_i', 'orb_j'])
+- `omega`: Real frequency grid for output
+- `eta`: Imaginary shift for analytic continuation (default: 0.05)
+- `beta` (float, required): Inverse temperature
+- `n_min` (int): Minimum Matsubara index (default: 0)
+- `n_max` (int, optional): Maximum Matsubara index (default: N//2)
 
 **Examples**:
 ```python
@@ -908,6 +1328,11 @@ dos_calc.plot_with_reference(-2.0, label='Flat band')
 
 # Compare two DOS curves
 dos_calc.plot_comparison((omega2, rho2), labels=['Model 1', 'Model 2'])
+
+# Compute DOS from interacting Green's function using Pade
+dos_int = dos_calc.from_matsubara_pade(
+    G_iwn, omega, eta=0.05, beta=10.0, n_min=0, n_max=32
+)
 ```
 
 ---
@@ -1223,6 +1648,17 @@ from condmatTensor.manybody.magnetic import (
     KondoLatticeSolver,
     SpinFermionModel,
     pauli_matrices
+)
+# Impurity solvers (ABC + implementations)
+from condmatTensor.manybody.impSolvers import (
+    ImpuritySolverABC,
+    IPTSolver,
+)
+# DMFT loop
+from condmatTensor.manybody.dmft import (
+    SingleSiteDMFTLoop,
+    MixingMethod,
+    LinearMixing,
 )
 
 # LEVEL 5: Analysis

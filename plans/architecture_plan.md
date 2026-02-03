@@ -51,10 +51,20 @@ src/condmatTensor/
 │   │   ├── **FIXED (2024-01-24)**: `build_spinful_hamiltonian()` now correctly copies both intra-site AND inter-site hopping
 │   │   ├── **References cited**: Kondo/s-d model literature for on-site J@S coupling
 │   │   └── **New methods**: `_is_already_spinful()`, updated `_detect_f_orbitals()` for spinful systems
-│   ├── dmft.py                 # SingleSiteDMFTLoop class [NOT IMPLEMENTED]
+│   ├── impSolvers/             # Impurity solvers subdirectory [IN PROGRESS - 2026-02-03]
+│   │   ├── __init__.py         # Exports: ImpuritySolverABC, IPTSolver
+│   │   ├── base.py (~150 lines)    # ImpuritySolverABC interface
+│   │   ├── ipt.py (~350 lines)     # IPTSolver (second-order perturbation theory)
+│   │   ├── ed.py               # EDSolver (Exact Diagonalization) [NOT IMPLEMENTED]
+│   │   ├── nrg.py              # NRGSolver (Numerical Renormalization Group) [NOT IMPLEMENTED]
+│   │   ├── ctqmc.py            # CTQMCSolver (Continuous-Time QMC) [NOT IMPLEMENTED]
+│   │   └── cnn_ci.py           # CNN_CI solver (CNN-selected CI) [NOT IMPLEMENTED]
+│   ├── dmft.py (~450 lines)    # SingleSiteDMFTLoop class [IN PROGRESS - 2026-02-03]
+│   │   ├── **Status**: Implementation planned
+│   │   ├── **Pattern**: Follows LocalMagneticModel.self_consistency_loop() (magnetic.py:554-702)
+│   │   ├── **Features**: 7-step DMFT algorithm, Dyson equation, Weiss field computation
+│   │   └── **ABC Integration**: Accepts any ImpuritySolverABC instance (IPT, ED, NRG, etc.)
 │   ├── cdmft.py                # ClusterDMFTLoop class (CDMFT/DCA style) [NOT IMPLEMENTED]
-│   ├── ipt.py                  # IPT solver [NOT IMPLEMENTED]
-│   └── ed.py                   # ED solver [NOT IMPLEMENTED]
 │
 ├── analysis/                   [LEVEL 5: Observables - +LEVEL 1, LEVEL 2, LEVEL 3] ✅ PARTIAL
 │   ├── __init__.py             # Exports: BandStructure, DOSCalculator, ProjectedDOS, plotting_style constants
@@ -701,8 +711,9 @@ examples/
 ├── test_sober_backend_specific.py     ✅ SOBER-specific: bounds format, device handling, edge cases
 ├── gpu_performance_benchmark.py     ✅ CPU vs GPU performance for all backends
 ├── bayesian_parameter_sweep_example.py ✅ Grid search vs Bayesian optimization comparison
+├── kagome_f_dmft.py                 # Kagome-F DMFT with orbital-selective correlations [IN PROGRESS - 2026-02-03]
 ├── phase1_kagome_basic.py           # Kagome: band structure, DOS (flat band) [LEGACY - replaced by kagome_bandstructure.py]
-├── phase2_kagome_dmft.py            # Kagome Hubbard model with DMFT
+├── phase2_kagome_dmft.py            # Kagome Hubbard model with DMFT (planned)
 ├── phase3_kagome_qgt.py             # Kagome QGT, Chern number, AHE
 ├── phase4_kagome_transport.py      # Kagome lattice transport
 ├── phase4_heterostructure.py      # Au-MoSe2-Graphene stacking
@@ -1365,21 +1376,23 @@ dos.plot()  # Uses stored results
 
 ### Phase 3: DMFT Loop with IPT
 
-**Corresponding Example**: `examples/phase2_kagome_dmft.py`
+**Corresponding Examples**:
+- `examples/kagome_f_dmft.py` - Kagome-F DMFT with orbital-selective correlations [IN PROGRESS - 2026-02-03]
+- `examples/phase2_kagome_dmft.py` - Kagome Hubbard model with DMFT (planned)
 
 **Goal**: Full DMFT self-consistency with preprocessing utilities.
 
 **Key Components**:
-- `dmft/preprocessing.py` for preprocessing
-- `solvers/ipt.py` for IPT solver
-- `dmft/singlesite.py` for `SingleSiteDMFTLoop` class
+- `manybody/ipt.py` for IPT solver with full particle-hole bubble
+- `manybody/dmft.py` for `SingleSiteDMFTLoop` class
+- `core/types.py` for OrbitalMetadata (orbital-selective U)
 
 **Workflow**:
 ```
 H(k) + Σ(ω) → G(k,ω) → G_loc(ω) → G0(ω) → IPT → Σ_new(ω)
 ```
 
-**Example**: Kagome Hubbard model with DMFT (see `examples/phase2_kagome_dmft.py`)
+**Example**: Kagome-F heavy-fermion model with DMFT (see `examples/kagome_f_dmft.py`)
 ```python
 # Import DMFT components
 from condmatTensor.manybody import DMFTLoop

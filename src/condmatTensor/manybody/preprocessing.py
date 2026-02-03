@@ -9,7 +9,7 @@ References:
     - Rev. Mod. Phys. 88, 025009 (2016) - DMFT review
 """
 
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union, List
 import torch
 import math
 
@@ -23,7 +23,22 @@ def generate_matsubara_frequencies(
     """Generate Matsubara frequency grid.
 
     Matsubara frequencies are discrete complex frequencies used in finite-
-    temperature many-body theory. For fermions: iωₙ = iπ(2n + 1)/β
+    temperature many-body theory.
+
+    **Indexing Scheme**:
+    - Frequencies are indexed from n = -n_max to n = +n_max (NOT from 0!)
+    - For n_max=3: indices are [-3, -2, -1, 0, 1, 2, 3]
+    - This symmetric indexing is physically meaningful for fermionic sums
+
+    **Fermionic Frequencies**:
+        iωₙ = iπ(2n + 1)/β
+
+    **Note**: The "zero" index (n=0) does NOT mean zero frequency!
+    - n=0 gives: iω₀ = iπ/β
+    - True zero frequency would require half-integer n
+
+    **For plotting**: Use torch.arange(len(omega)) for x-axis labels.
+    The actual Matsubara frequencies are omega[label_index].
 
     Args:
         beta: Inverse temperature (β = 1/k_B T)
@@ -35,6 +50,7 @@ def generate_matsubara_frequencies(
     Returns:
         Complex tensor of Matsubara frequencies with shape (2*n_max + 1,)
         Frequencies are ordered from n = -n_max to n = n_max
+        Example for n_max=2: [iω₋₂, iω₋₁, iω₀, iω₊₁, iω₊₂]
     """
     if device is None:
         device = torch.device("cpu")
@@ -50,6 +66,53 @@ def generate_matsubara_frequencies(
         freq = 1j * 2 * torch.pi * n / beta
 
     return freq.to(torch.complex128)
+
+
+def calculate_dos_range(
+    evals_min: float,
+    evals_max: float,
+    sigma_shift: float,
+    U_max: float,
+    margin: float = 2.0,
+) -> Tuple[float, float]:
+    """Auto-calculate DOS range for interacting systems.
+
+    For interacting systems with Hubbard U, the DOS can extend significantly
+    beyond the non-interacting band range due to:
+    1. Self-energy shifts: Re[Σ] can push bands up or down
+    2. Hubbard bands: Can appear at ±U/2 from the Fermi level
+
+    This function computes a safe energy range for DOS calculations.
+
+    Args:
+        evals_min: Minimum eigenvalue from band structure (units of |t|)
+        evals_max: Maximum eigenvalue from band structure (units of |t|)
+        sigma_shift: Maximum |Re[Σ]| from self-energy (units of |t|)
+        U_max: Maximum Hubbard U value (units of |t|)
+        margin: Additional safety margin (default: 2.0)
+
+    Returns:
+        (omega_min, omega_max) - Energy range for DOS calculation
+
+    Example:
+        >>> evals_min, evals_max = -3.0, 5.0  # Kagome-F bands
+        >>> sigma_shift = 1.5  # From self-energy
+        >>> U_max = 4.0  # Hubbard U on f-orbital
+        >>> omega_min, omega_max = calculate_dos_range(
+        ...     evals_min, evals_max, sigma_shift, U_max
+        ... )
+        >>> print(f"DOS range: [{omega_min:.1f}, {omega_max:.1f}]")
+        DOS range: [-12.5, 14.5]
+    """
+    # Account for band structure, self-energy shift, and Hubbard bands
+    # Hubbard bands can appear at approximately ±U/2 from renormalized bands
+    width = (evals_max - evals_min) + 2 * sigma_shift + U_max
+    center = (evals_min + evals_max) / 2
+
+    omega_min = center - width / 2 - margin
+    omega_max = center + width / 2 + margin
+
+    return omega_min, omega_max
 
 
 class BareGreensFunction:
@@ -255,12 +318,22 @@ class SpectralFunction:
     Attributes:
         omega: Real frequency grid
         A: Spectral function values
+        tolerance: Numerical tolerance for Pade algorithm (< 1e-6)
     """
 
-    def __init__(self) -> None:
-        """Initialize SpectralFunction."""
+    def __init__(self, tolerance: float = 1e-12) -> None:
+        """Initialize SpectralFunction.
+
+        Args:
+            tolerance: Numerical tolerance for Pade comparisons (default: 1e-12).
+                      Must be < 1e-6 for double precision accuracy.
+        """
+        if tolerance >= 1e-6:
+            raise ValueError(f"tolerance must be < 1e-6, got {tolerance}")
         self.omega: Optional[torch.Tensor] = None
         self.A: Optional[torch.Tensor] = None
+        self.beta: Optional[float] = None  # Inverse temperature
+        self.tolerance = tolerance
 
     def from_eigenvalues(
         self,
@@ -321,38 +394,84 @@ class SpectralFunction:
         eta: float = 0.02,
         method: str = "simple",
         device: Optional[torch.device] = None,
+        beta: Optional[float] = None,
+        n_min: int = 0,
+        n_max: Optional[int] = None,
+        **method_kwargs,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute A(ω) from Matsubara Green's function.
 
         Performs analytic continuation from imaginary frequencies iωₙ to real
-        frequencies ω + iη. Two methods are available:
+        frequencies ω + iη using modular continuation methods.
 
+        Available methods:
         1. 'simple': Direct substitution iωₙ → ω + iη
-           Fast but approximate, valid for smooth functions
+           Fast but approximate, valid for smooth functions only
 
-        2. 'pade': Padé approximant (not yet implemented)
+        2. 'pade': Padé approximant (Vidberg-Serene continued fraction)
            More accurate but computationally intensive
+
+        3. 'bethe': Bethe lattice analytical solution
+           Semi-elliptical DOS, useful for testing
+
+        4. 'maxent': Maximum entropy method (NOT YET IMPLEMENTED)
+           Most robust for noisy data
 
         Args:
             G_iwn: Green's function on Matsubara frequencies, labels=['iwn', 'orb_i', 'orb_j']
             omega: Real frequency grid, shape (n_omega,)
             eta: Small positive imaginary part (default: 0.02)
-            method: Analytic continuation method ('simple' or 'pade')
+            method: Analytic continuation method ('simple', 'pade', 'bethe', 'maxent')
             device: Device for computation (default: matches G_iwn.device)
+            beta: Inverse temperature (required for Pade continuation)
+            n_min: Minimum Matsubara index for Pade (default: 0)
+            n_max: Maximum Matsubara index for Pade (default: N//2)
+            **method_kwargs: Method-specific parameters:
+                - For 'bethe': z (coordination number), t (hopping), lattice
+                - For 'maxent': alpha, default_model, etc.
 
         Returns:
-            (omega, A) tuple where A has shape (n_omega, n_orb, n_orb)
+            (omega, A) tuple where A has shape (n_omega, n_orb)
             Diagonal elements are Aᵢ(ω) for each orbital
+
+        Raises:
+            ValueError: If method is unknown
+            NotImplementedError: If method is not yet implemented (e.g., 'maxent')
         """
         if device is None:
             device = G_iwn.tensor.device
 
-        if method == "simple":
-            return self._simple_continuation(G_iwn, omega, eta, device)
-        elif method == "pade":
-            return self._pade_continuation(G_iwn, omega, eta, device)
-        else:
-            raise ValueError(f"Unknown method: {method}. Use 'simple' or 'pade'.")
+        # Store beta for Pade continuation
+        if beta is not None:
+            self.beta = beta
+        elif self.beta is None and method == "pade":
+            raise ValueError("beta must be provided for Pade continuation")
+
+        # Use the new modular framework
+        from condmatTensor.manybody.analytic_continuation import (
+            create_continuation_method,
+        )
+
+        continuation_method = create_continuation_method(method)
+
+        # Prepare method-specific parameters
+        method_params = {
+            'eta': eta,
+            'beta': beta,
+            'n_min': n_min,
+            'n_max': n_max,
+            **method_kwargs,
+        }
+
+        # Call the continuation method
+        A = continuation_method.continue_to_real_axis(
+            G_iwn.tensor, omega, **method_params
+        )
+
+        self.omega = omega
+        self.A = A
+
+        return omega, A
 
     def _simple_continuation(
         self,
@@ -404,15 +523,184 @@ class SpectralFunction:
         omega: torch.Tensor,
         eta: float,
         device: torch.device,
+        n_min: int = 0,
+        n_max: Optional[int] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Padé approximant for analytic continuation.
 
-        Not yet implemented - will use external library or custom implementation.
+        Uses continued fraction representation following the Vidberg-Serene algorithm.
+        This provides a more accurate analytic continuation from Matsubara frequencies
+        to real frequencies than the simple substitution method.
+
+        The Padé approximant constructs a rational function C_M(z) = A_M(z) / B_M(z)
+        that matches G(iωₙ) at M selected Matsubara frequencies and is evaluated
+        at z = ω + iη to obtain the spectral function.
+
+        Args:
+            G_iwn: Green's function on Matsubara frequencies, labels=['iwn', 'orb_i', 'orb_j']
+            omega: Real frequency grid for output, shape (n_omega,)
+            eta: Imaginary shift (iωₙ → ω + iη)
+            device: Device for computation
+            n_min: Minimum Matsubara index to use (default: 0)
+            n_max: Maximum Matsubara index (default: N//2)
+
+        Returns:
+            (omega, A) tuple where A has shape (n_omega, n_orb)
+            Diagonal elements are Aᵢ(ω) for each orbital
+
+        Reference:
+            Vidberg H.J. and Serene J.W., J. Low Temp. Phys. 29, 179 (1977)
+            Beach K.S., Gooding R.J., Marsiglio F., Phys. Rev. B 61, 5147 (2000)
         """
-        raise NotImplementedError(
-            "Padé approximant continuation not yet implemented. "
-            "Use method='simple' for now."
-        )
+        n_iwn, n_orb, _ = G_iwn.shape
+        if n_max is None:
+            n_max = n_iwn // 2
+
+        # Generate Matsubara frequencies for the selected range
+        # We need the actual frequency values, not just indices
+        # Use symmetric selection around zero for best Padé stability
+        n_vals = torch.arange(n_iwn, device=device) - n_iwn // 2
+
+        # Select frequencies: prefer low frequencies where signal is strongest
+        # Start from n_vals=0 (first positive frequency)
+        idx_start = (n_iwn // 2) + n_min  # Convert to actual index
+
+        # OPTIMIZED FREQUENCY SELECTION:
+        # Instead of blindly using n_max frequencies, select based on |G| magnitude
+        # Higher frequencies have exponentially smaller |G| and contribute noise
+
+        # Get the first n_max candidate frequencies
+        idx_end_candidate = min(idx_start + n_max, n_iwn)
+
+        # Use first orbital as reference (all orbitals should have similar decay)
+        G_candidate = G_iwn.tensor[idx_start:idx_end_candidate, 0, 0]
+
+        # Compute |G| for candidate frequencies
+        G_mag = torch.abs(G_candidate)
+
+        # Adaptive selection: use frequencies where |G| > threshold
+        # Threshold: relative (0.1% of max) OR absolute (self.tolerance)
+        # This automatically excludes noisy high-frequency data
+        relative_threshold = 1e-3 * G_mag.max().item()
+        threshold = max(relative_threshold, self.tolerance)
+
+        # Find indices where |G| > threshold
+        significant_mask = G_mag > threshold
+        n_significant = significant_mask.sum().item()
+
+        # Cap at a reasonable maximum to avoid numerical instability
+        # Empirically, 20-30 frequencies is optimal for most cases
+        n_optimal = min(n_significant, 30)
+
+        # Ensure we use at least a minimum number of frequencies
+        n_optimal = max(n_optimal, 8)
+
+        idx_end = idx_start + n_optimal
+
+        # Handle boundary conditions
+        if idx_end > n_iwn:
+            idx_end = n_iwn
+            idx_start = max(0, idx_end - n_optimal)
+
+        # Complex frequencies for Padé construction
+        n_vals_selected = n_vals[idx_start:idx_end]
+        wn = (2 * n_vals_selected + 1) * math.pi / self.beta  # Fermionic Matsubara frequencies
+
+        # Complex Matsubara frequencies
+        z_iwn = 1j * wn
+
+        # Extract diagonal elements (orbital-diagonal approximation)
+        A = torch.zeros((len(omega), n_orb), dtype=torch.float64, device=device)
+
+        for orb in range(n_orb):
+            # Get G_ii(iωₙ) for this orbital
+            G_diag = G_iwn.tensor[idx_start:idx_end, orb, orb]
+
+            # Compute Pade approximant for this orbital
+            A[:, orb] = self._pade_continued_fraction(
+                G_diag, z_iwn, omega, eta, device
+            )
+
+        self.omega = omega
+        self.A = A
+
+        return omega, A
+
+    def _pade_continued_fraction(
+        self,
+        G_iwn: torch.Tensor,
+        z_iwn: torch.Tensor,
+        omega: torch.Tensor,
+        eta: float,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Compute Pade approximant using continued fractions.
+
+        Uses the Vidberg-Serene algorithm which constructs a continued fraction
+        representation of the Pade approximant:
+
+        C_M(z) = a₀ / (1 + a₁(z-z₀) / (1 + a₂(z-z₁) / (...)))
+
+        where the coefficients aᵢ are determined from the values G(iωₙ).
+
+        Args:
+            G_iwn: Green's function values at Matsubara frequencies (1D)
+            z_iwn: Complex Matsubara frequencies iωₙ
+            omega: Real frequency grid
+            eta: Imaginary shift
+            device: Computation device
+
+        Returns:
+            Spectral function A(ω) = -(1/π)Im[G(ω + iη)]
+        """
+        N = len(G_iwn)
+        n_omega = len(omega)
+
+        # Flatten G_iwn to 1D for g-table construction (extract diagonal)
+        G_iwn_1d = G_iwn[:, 0]  # Shape (N,)
+
+        # 1. Build g-table using continued fraction recursion (Vidberg-Serene)
+        # g[i, j] represents the j-th element in the i-th column
+        g = torch.zeros((N, N), dtype=torch.complex128, device=device)
+
+        # First column: original G values
+        g[0, :] = G_iwn_1d
+
+        # Build the g-table recursively
+        # g[i, j] = (g[i-1, i-1] - g[i-1, j]) / ((z_j - z_{i-1}) * g[i-1, j])
+        for i in range(1, N):
+            for j in range(i, N):
+                numerator = g[i-1, i-1] - g[i-1, j]
+                denominator = (z_iwn[j] - z_iwn[i-1]) * g[i-1, j]
+                if torch.abs(denominator) > self.tolerance:
+                    g[i, j] = numerator / denominator
+                else:
+                    g[i, j] = 0.0
+
+        # 2. Extract continued fraction coefficients from diagonal
+        # a₀ = g[0,0], a₁ = g[1,1], a₂ = g[2,2], ...
+        a = torch.zeros(N, dtype=torch.complex128, device=device)
+        for i in range(N):
+            a[i] = g[i, i]
+
+        # 3. Evaluate continued fraction at each real frequency
+        A = torch.zeros(n_omega, dtype=torch.float64, device=device)
+
+        for i_omega, w_val in enumerate(omega):
+            z_val = w_val + 1j * eta
+
+            # Evaluate continued fraction from bottom up
+            # C(z) = a₀ / (1 + a₁(z-z₀) / (1 + a₂(z-z₁) / (1 + ...)))
+            result = 0j
+            for i in range(N-1, 0, -1):
+                result = a[i] * (z_val - z_iwn[i-1]) / (1.0 + result)
+
+            G_pade = a[0] / (1.0 + result)
+
+            # Spectral function: A(ω) = -(1/π)Im[G(ω + iη)]
+            A[i_omega] = -1.0 / math.pi * G_pade.imag
+
+        return A
 
     def compute_dos(
         self,

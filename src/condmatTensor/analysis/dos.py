@@ -113,6 +113,58 @@ class DOSCalculator:
 
         return omega, rho
 
+    def from_matsubara_pade(
+        self,
+        G_iwn: "BaseTensor",
+        omega: torch.Tensor,
+        eta: float = 0.05,
+        beta: Optional[float] = None,
+        n_min: int = 0,
+        n_max: Optional[int] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute DOS from Matsubara Green's function using Pade continuation.
+
+        This method computes the spectral function A(ω) from the Matsubara
+        Green's function G(iωₙ) using Padé approximant analytic continuation,
+        then sums over orbitals to obtain the total DOS.
+
+        Args:
+            G_iwn: Green's function on Matsubara frequencies with labels=['iwn', 'orb_i', 'orb_j']
+            omega: Real frequency grid for output
+            eta: Imaginary shift for analytic continuation (default: 0.05)
+            beta: Inverse temperature (required for Pade continuation)
+            n_min: Minimum Matsubara frequency index (default: 0)
+            n_max: Maximum Matsubara frequency index (default: N//2)
+
+        Returns:
+            (omega, dos) tuple where dos is the total density of states
+
+        Raises:
+            ValueError: If beta is not provided
+
+        Note:
+            This is a convenience wrapper around SpectralFunction.from_matsubara()
+            with method='pade'.
+        """
+        from condmatTensor.manybody.preprocessing import SpectralFunction
+
+        if beta is None:
+            raise ValueError("beta must be provided for Pade continuation")
+
+        spectral = SpectralFunction()
+        _, A = spectral.from_matsubara(
+            G_iwn, omega, eta=eta, method="pade",
+            beta=beta, n_min=n_min, n_max=n_max
+        )
+
+        dos = spectral.compute_dos(A)
+
+        self.omega = omega
+        self.rho = dos
+        self.eta = eta
+
+        return omega, dos
+
     def plot(
         self,
         ax: Optional["maxes.Axes"] = None,

@@ -24,6 +24,9 @@ from condmatTensor.analysis.plotting_style import (
     DEFAULT_COLORS,
 )
 
+# Extend DEFAULT_FIGURE_SIZES with custom layouts
+DEFAULT_FIGURE_SIZES['3x3'] = (18, 15)
+
 # =============================================================================
 # Path Setup (auto-run on import)
 # =============================================================================
@@ -412,6 +415,7 @@ def setup_example_figure(
     layouts_2d = {
         '2x2': (2, 2),
         'comparison_2x3': (2, 3),
+        '3x3': (3, 3),  # NEW: for U-scan band structure grid
     }
 
     if plot_type in layouts_2d:
@@ -433,7 +437,8 @@ def save_example_figure(
     fig,
     filename: str,
     dpi: int = 150,
-    tight: bool = True
+    tight: bool = True,
+    output_dir: str = None
 ) -> None:
     """Save figure with standard settings.
 
@@ -442,8 +447,18 @@ def save_example_figure(
         filename: Output filename
         dpi: Resolution (default 150)
         tight: Whether to apply tight_layout (default True)
+        output_dir: Optional output directory path (default None for current dir)
     """
     if tight:
         plt.tight_layout()
-    fig.savefig(filename, dpi=dpi, bbox_inches='tight')
-    print(f"Saved: {filename}")
+
+    # Construct full path if output_dir provided
+    if output_dir:
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        full_path = output_path / filename
+    else:
+        full_path = filename
+
+    fig.savefig(full_path, dpi=dpi, bbox_inches='tight')
+    print(f"Saved: {full_path}")
