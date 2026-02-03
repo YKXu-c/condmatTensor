@@ -2,7 +2,7 @@
 
 **Version**: 0.0.1
 **License**: MIT
-**Implementation Status**: ~45% complete (5 of 10 levels partially/fully implemented, ~5,400 lines)
+**Implementation Status**: ~45% complete (5 of 10 levels partially/fully implemented, ~5,900 lines)
 
 ---
 
@@ -141,7 +141,7 @@ All energies are **dimensionless** in units of hopping parameter `|t|`. Default:
 
 **Status**: ✅ Complete
 **Path**: `src/condmatTensor/core/`
-**Files**: `base.py` (139 lines), `device.py` (88 lines)
+**Files**: `base.py` (285 lines), `types.py` (145 lines), `device.py` (87 lines)
 
 ### Classes
 
@@ -356,7 +356,7 @@ if is_cuda_available():
 
 **Status**: ✅ Complete
 **Path**: `src/condmatTensor/lattice/`
-**Files**: `model.py` (375 lines), `bzone.py` (95 lines)
+**Files**: `model.py` (421 lines), `bzone.py` (94 lines)
 
 ### Classes
 
@@ -593,7 +593,7 @@ print(evals.shape)  # (150, 3) - (N_k, N_orb)
 
 **Status**: ⚠️ Partial (DMFT loops not implemented)
 **Path**: `src/condmatTensor/manybody/`
-**Files**: `preprocessing.py` (497 lines), `magnetic.py` (812 lines)
+**Files**: `preprocessing.py` (496 lines), `magnetic.py` (840 lines)
 
 ### Functions
 
@@ -834,7 +834,7 @@ SpinFermionModel(H0=None, J_tensor=None, S_init=None)
 
 **Status**: ⚠️ Partial (Topology, QGT not implemented)
 **Path**: `src/condmatTensor/analysis/`
-**Files**: `dos.py` (~520 lines), `bandstr.py` (~550 lines), `plotting_style.py` (70 lines)
+**Files**: `dos.py` (601 lines), `bandstr.py` (626 lines), `plotting_style.py` (87 lines)
 
 ### Modules
 
@@ -994,7 +994,7 @@ bs.plot_multi_panel([evals1, evals2, evals3], titles=['t_f=-1.0', 't_f=-0.5', 't
 
 **Status**: ⚠️ Partial (ML interface not implemented)
 **Path**: `src/condmatTensor/optimization/`
-**Files**: `bayesian/__init__.py` (467 lines), `magnetic.py` (620 lines)
+**Files**: `bayesian/__init__.py` (466 lines), `magnetic.py` (631 lines)
 
 ### Backend Priority
 
@@ -1307,4 +1307,4 @@ The `examples/` directory demonstrates and validates core physics:
 
 ---
 
-*Last Updated: 2026-01-25*
+*Last Updated: 2026-02-03*

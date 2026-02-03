@@ -12,8 +12,8 @@ A PyTorch-based condensed matter physics library with a unified `BaseTensor` cla
 
 2. **Kagome-F** (`examples/kagome_with_f_bandstructure.py`): Kagome lattice with central f-orbital atom (4 sites per unit cell). Models heavy-fermion systems. Tests multi-orbital physics, orbital hybridization, parameter scans (t, t_f, ε_f). **556 lines**.
 
-**Implementation Status** (as of 2026-01-23):
-- **LEVEL 1-3, partial LEVEL 4, LEVEL 5, and LEVEL 7**: ~3,580 lines implemented (excluding __init__.py)
+**Implementation Status** (as of 2026-02-03):
+- **LEVEL 1-3, partial LEVEL 4, LEVEL 5, and LEVEL 7**: ~5,900 lines implemented (excluding __init__.py)
 - Examples validate 3 methods of Hamiltonian construction agree to <1e-6:
   1. Direct k-space (analytic formula)
   2. `HoppingModel.build_Hk()` (direct from hopping)
@@ -26,14 +26,16 @@ src/condmatTensor/
 ├── __init__.py                 # Package initialization (v0.0.1), clear dependency relations
 │
 ├── core/                       [LEVEL 1: Foundation - 0 internal deps] ✅ IMPLEMENTED
-│   ├── __init__.py             # Exports: BaseTensor
-│   ├── base.py (138 lines)     # BaseTensor class (tensor + labels + orbital names + displacements)
+│   ├── __init__.py             # Exports: BaseTensor, OrbitalMetadata, get_device
+│   ├── base.py (285 lines)     # BaseTensor class (tensor + labels + orbital names + orbital_metadatas + displacements)
+│   ├── types.py (145 lines)    # OrbitalMetadata dataclass for structured orbital metadata
+│   ├── device.py (87 lines)    # Device management: get_device(), is_cuda_available()
 │   ├── math.py                 # tensor math utilities, Berry curvature helpers [NOT IMPLEMENTED]
-│   └── gpu_utils.py            # device selection, memory estimates, chunking [NOT IMPLEMENTED]
+│   └── gpu_utils.py            # memory estimates, chunking [NOT IMPLEMENTED]
 │
 ├── lattice/                    [LEVEL 2: Data Structures - +LEVEL 1] ✅ IMPLEMENTED
 │   ├── __init__.py             # Exports: BravaisLattice, HoppingModel, generate_kmesh, generate_k_path
-│   ├── model.py (337 lines)    # BravaisLattice class, HoppingModel class
+│   ├── model.py (421 lines)    # BravaisLattice class, HoppingModel class
 │   ├── bzone.py (94 lines)     # generate_kmesh(), generate_k_path(), k_frac_to_cart()
 │   └── symmetry.py             [LEVEL 10: Symmetry Reduction - +LEVEL 1, LEVEL 2] [NOT IMPLEMENTED]
 │
@@ -45,7 +47,7 @@ src/condmatTensor/
 ├── manybody/                   [LEVEL 4: Many-Body Physics - +LEVEL 1, LEVEL 2, LEVEL 3] ✅ PARTIAL
 │   ├── __init__.py             # Exports: preprocessing and magnetic classes
 │   ├── preprocessing.py (496 lines)  ✅ Matsubara frequencies, BareGreensFunction, SelfEnergy, SpectralFunction
-│   ├── magnetic.py (~870 lines)    ✅ LocalMagneticModel, KondoLatticeSolver, SpinFermionModel, pauli_matrices
+│   ├── magnetic.py (840 lines)     ✅ LocalMagneticModel, KondoLatticeSolver, SpinFermionModel, pauli_matrices
 │   │   ├── **FIXED (2024-01-24)**: `build_spinful_hamiltonian()` now correctly copies both intra-site AND inter-site hopping
 │   │   ├── **References cited**: Kondo/s-d model literature for on-site J@S coupling
 │   │   └── **New methods**: `_is_already_spinful()`, updated `_detect_f_orbitals()` for spinful systems
@@ -55,12 +57,13 @@ src/condmatTensor/
 │   └── ed.py                   # ED solver [NOT IMPLEMENTED]
 │
 ├── analysis/                   [LEVEL 5: Observables - +LEVEL 1, LEVEL 2, LEVEL 3] ✅ PARTIAL
-│   ├── __init__.py             # Exports: BandStructure, DOSCalculator, ProjectedDOS
-│   ├── dos.py (312 lines)      # DOSCalculator class, ProjectedDOS class
+│   ├── __init__.py             # Exports: BandStructure, DOSCalculator, ProjectedDOS, plotting_style constants
+│   ├── dos.py (601 lines)      # DOSCalculator class, ProjectedDOS class with enhanced plotting methods
+│   ├── bandstr.py (626 lines)  # BandStructure class with enhanced plotting methods (comparison, multi-panel, colored by weight)
+│   ├── plotting_style.py (87 lines)  # Standardized plotting style constants for publication-quality plots
 │   ├── qgt.py                  # QGT functions: hk_to_g_layer, hr_to_g_layer, compute_qgt [NOT IMPLEMENTED]
 │   ├── topology.py             # Berry curvature, Chern, Z₂, AHE functions [NOT IMPLEMENTED]
-│   ├── fermi.py                # FermiSurface class [NOT IMPLEMENTED]
-│   └── bandstr.py (237 lines)  # BandStructure class with plot() and plot_with_dos()
+│   └── fermi.py                # FermiSurface class [NOT IMPLEMENTED]
 │
 ├── transport/                  [LEVEL 6: Transport Properties - +LEVEL 1, LEVEL 2] ❌ NOT IMPLEMENTED
 │   ├── __init__.py
@@ -69,8 +72,13 @@ src/condmatTensor/
 │
 ├── optimization/               [LEVEL 7: Parameter Search - +LEVEL 4] ✅ PARTIAL
 │   ├── __init__.py             # Exports: BayesianOptimizer, MultiObjectiveOptimizer, EffectiveArrayOptimizer
-│   ├── bayesian.py (573 lines)      ✅ BayesianOptimizer, MultiObjectiveOptimizer (uses botorch/scikit-optimize)
-│   ├── magnetic.py (~620 lines)     ✅ EffectiveArrayOptimizer for Kondo/spin-fermion model downfolding
+│   ├── bayesian/               # Bayesian optimization with multiple backends
+│   │   ├── __init__.py (466 lines)   # BayesianOptimizer, MultiObjectiveOptimizer main classes
+│   │   ├── sober_backend.py (365 lines)  # SOBER (Sequential Optimization using Ensemble of Regressors)
+│   │   ├── botorch_backend.py (280 lines)  # BoTorch Gaussian Process backend
+│   │   ├── simple_backend.py (239 lines)   # Fallback Thompson sampling / random search
+│   │   └── utils.py (128 lines)           # Latin Hypercube Sampling, utility functions
+│   ├── magnetic.py (631 lines)      ✅ EffectiveArrayOptimizer for Kondo/spin-fermion model downfolding
 │   │   ├── **FIXED (2024-01-24)**: Proper spinful system handling with `_is_already_spinful()` detection
 │   │   ├── **FIXED (2024-01-24)**: Updated `_detect_f_orbitals()` to detect both f_up and f_down orbitals
 │   │   ├── **FIXED (2024-01-24)**: J@S coupling now properly on-site (per lattice site)
@@ -153,7 +161,7 @@ src/condmatTensor/
             ▼                       └─────────┬─────────┘            │
 ┌───────────────────────┐                     │                    │
 │ LEVEL 7: Optimization  │                     │                    │
-│  • bayesian.py        ◄─────────────────────┘                    │
+│  • bayesian/          ◄─────────────────────┘                    │
 │  • ml_interface.py    │                                          │
 └───────────────────────┘                                          │
          ┌───────────────────┐                                      │
@@ -184,12 +192,23 @@ This section provides detailed dependency information for each level, including 
 **Can Import Independently**: ✅ Yes
 
 **Key Classes**:
-- `BaseTensor` - Unified tensor representation with semantic labels
+- `BaseTensor` - Unified tensor representation with semantic labels and orbital metadata system
+- `OrbitalMetadata` - Dataclass for structured orbital metadata (site, orbital type, spin, localization, Hubbard U)
 - `get_device()` - Auto-detect CUDA/CPU/MPS device
+- `is_cuda_available()` - Check CUDA availability
 
 **Usage**:
 ```python
-from condmatTensor.core import BaseTensor, get_device
+from condmatTensor.core import BaseTensor, OrbitalMetadata, get_device
+
+# Create orbital metadata for f-electron system
+orbital_metas = [
+    OrbitalMetadata(site='Ce1', orb='f', spin='up', local=True, U=7.0),
+    OrbitalMetadata(site='Ce1', orb='f', spin='down', local=True, U=7.0),
+]
+
+# Create BaseTensor with orbital metadata
+H = BaseTensor(tensor, labels=['k', 'orb_i', 'orb_j'], orbital_metadatas=orbital_metas)
 ```
 
 ---
@@ -278,7 +297,7 @@ from condmatTensor.manybody.magnetic import (
 
 ### LEVEL 5: Analysis (Depends on LEVEL 1, LEVEL 2, LEVEL 3)
 
-**Files**: `analysis/dos.py`, `analysis/bandstr.py`, `analysis/fermi.py` (not implemented), `analysis/qgt.py` (not implemented), `analysis/topology.py` (not implemented)
+**Files**: `analysis/dos.py`, `analysis/bandstr.py`, `analysis/plotting_style.py`, `analysis/fermi.py` (not implemented), `analysis/qgt.py` (not implemented), `analysis/topology.py` (not implemented)
 
 **Internal Dependencies**: `core`, `lattice`, `solvers.diag`, `analysis.qgt` (for topology)
 
@@ -287,16 +306,25 @@ from condmatTensor.manybody.magnetic import (
 **Can Import Independently**: ✅ Yes (after core, lattice, solvers)
 
 **Key Classes**:
-- `DOSCalculator` - Density of States calculator with Lorentzian broadening
+- `DOSCalculator` - Density of States calculator with Lorentzian broadening and enhanced plotting (comparison, multi-panel, reference lines)
 - `ProjectedDOS` - Projected DOS extending DOSCalculator
-- `BandStructure` - Band structure calculator and plotting
+- `BandStructure` - Band structure calculator with enhanced plotting (comparison, multi-panel, colored by weight, DOS overlay)
+- Plotting style constants (DEFAULT_FIGURE_SIZES, DEFAULT_COLORS, DEFAULT_FONTSIZES, etc.)
 
 **Usage**:
 ```python
 from condmatTensor.analysis import (
     DOSCalculator,
     ProjectedDOS,
-    BandStructure
+    BandStructure,
+    # Plotting style constants
+    DEFAULT_FIGURE_SIZES,
+    DEFAULT_COLORS,
+    DEFAULT_FONTSIZES,
+    DEFAULT_STYLING,
+    DEFAULT_COLORMAPS,
+    LINE_STYLES,
+    MARKER_STYLES,
 )
 ```
 
@@ -318,7 +346,7 @@ from condmatTensor.analysis import (
 
 ### LEVEL 7: Optimization (Depends on LEVEL 4)
 
-**Files**: `optimization/bayesian.py`, `optimization/magnetic.py`, `optimization/ml_interface.py` (not implemented)
+**Files**: `optimization/bayesian/__init__.py`, `optimization/bayesian/sober_backend.py`, `optimization/bayesian/botorch_backend.py`, `optimization/bayesian/simple_backend.py`, `optimization/bayesian/utils.py`, `optimization/magnetic.py`, `optimization/ml_interface.py` (not implemented)
 
 **Internal Dependencies**: `manybody`
 
@@ -327,9 +355,10 @@ from condmatTensor.analysis import (
 **Can Import Independently**: ✅ Yes (after manybody)
 
 **Key Classes**:
-- `BayesianOptimizer` - Bayesian optimization with multiple backends
-- `MultiObjectiveOptimizer` - Multi-objective optimization
+- `BayesianOptimizer` - Bayesian optimization with SOBER, BoTorch, or Simple backends (auto-detection)
+- `MultiObjectiveOptimizer` - Multi-objective optimization with Pareto front
 - `EffectiveArrayOptimizer` - Effective array downfolding optimizer
+- `SoberBackend`, `BotorchBackend`, `SimpleBackend` - Backend implementations
 
 **Usage**:
 ```python
@@ -1198,7 +1227,23 @@ g_i = (E - H_i - V_{i,i-1} g_{i-1} V_{i-1,i})^(-1)
 
 ### LEVEL 7: Optimization Module
 
-Uses standard Bayesian optimization (scikit-optimize) - no physics-specific formalism.
+**Bayesian Optimization with Multiple Backends:**
+
+The library supports three backends with automatic fallback:
+1. **SOBER** (Sequential Optimization using Ensemble of Regressors) - Preferred backend
+2. **BoTorch** - Gaussian Process with Expected Improvement
+3. **Simple** - Thompson sampling / random search fallback
+
+**Acquisition Functions:**
+- Expected Improvement (EI)
+- Upper Confidence Bound (UCB)
+- Probability of Improvement (PI)
+- Thompson Sampling (Simple backend)
+
+**Multi-Objective Optimization:**
+- Pareto front extraction
+- Hypervolume calculation
+- Non-dominated sorting
 
 ### LEVEL 8: Interface Module
 
@@ -2640,7 +2685,7 @@ class DOSCalculator:
 | chern_number | `from condmatTensor.analysis.topology import chern_number` |
 | RGF | `from condmatTensor.transport import RGF` |
 | stacking_rgf | `from condmatTensor.transport import stacking_rgf` |
-| BayesianOptimizer | `from condmatTensor.optimization.bayesian import BayesianOptimizer` |
+| BayesianOptimizer | `from condmatTensor.optimization import BayesianOptimizer` |
 | DOSCalculator | `from condmatTensor.analysis import DOSCalculator` |
 
 ## References
