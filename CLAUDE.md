@@ -416,10 +416,48 @@ The `examples/` directory demonstrates and validates core physics:
 5. **Research-focused** - Designed for quantum materials research, not web/applications
 6. **No circular dependencies** - Lower levels never depend on higher levels
 7. **venv required** - in env_condmatTensor
-8. **Development logging** - All development work must be logged in `developLog/` directory:
-   - `developLog/allAPI.md` - Complete API documentation (update when API changes)
-   - `developLog/developLog_YYYY-MM-DD.md` - Daily development logs
-   - See `plans/architecture_plan.md` Rule 5 and `.cursorrules` Rule 8 for details
+
+---
+
+## Development Workflow (REQUIRED)
+
+### Before Starting Development
+
+**ALWAYS read these files before implementing any new feature or modification:**
+
+1. **`plans/architecture_plan.md`** - Comprehensive architecture reference:
+   - Module details and formalism
+   - Equations and workflows
+   - Dependencies between levels
+   - Design patterns and conventions
+
+2. **`plans/DEPENDENCY_ANALYSIS.md`** - Comparison with reference libraries:
+   - Architecture patterns from NumPy, TRIQS, WannierTools
+   - Explicit dependency relations
+   - Implementation status and API reference
+
+### After Completing Development
+
+**ALWAYS update the development log files:**
+
+1. **`developLog/allAPI.md`** - Complete API documentation:
+   - Add new modules/classes/functions
+   - Update API signatures when they change
+   - Include usage examples
+   - Update implementation status
+
+2. **`developLog/developLog_YYYY-MM-DD.md`** - Daily development log:
+   - Date of work session
+   - Summary of changes made
+   - New features implemented
+   - Bugs fixed or issues resolved
+   - API changes or deprecations
+   - Validation/test results
+   - Next steps or pending items
+
+**Rationale**: This workflow ensures architectural consistency, prevents design drift, and maintains comprehensive project documentation for future developers.
+
+**Cross-Reference**: This rule is also documented in `plans/architecture_plan.md` Rule 5 and `.cursorrules` Rule 8.
 
 ---
 

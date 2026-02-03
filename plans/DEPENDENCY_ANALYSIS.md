@@ -150,21 +150,23 @@ triqs (C++ library + Python bindings)
 
 ## 2. condmatTensor Architecture Analysis
 
-### 2.1 Current Implementation Status (as of 2026-01-23)
+### 2.1 Current Implementation Status (as of 2026-02-03)
 
-**Total Implementation**: ~3,580 lines across LEVEL 1-3, partial LEVEL 4, LEVEL 5, and LEVEL 7
+**Total Implementation**: ~5,900 lines across LEVEL 1-3, partial LEVEL 4, LEVEL 5, and LEVEL 7
 
 ```
 src/condmatTensor/
 ├── core/
 │   ├── __init__.py
-│   └── base.py (138 lines)             ✅ BaseTensor with semantic labels and Fourier transform
+│   ├── base.py (285 lines)             ✅ BaseTensor with semantic labels, orbital metadata, and Fourier transform
+│   ├── types.py (145 lines)            ✅ OrbitalMetadata dataclass for structured orbital metadata
+│   ├── device.py (87 lines)            ✅ get_device(), is_cuda_available(), get_default_device()
 │   ├── math.py                         ❌ NOT IMPLEMENTED
 │   └── gpu_utils.py                    ❌ NOT IMPLEMENTED
 │
 ├── lattice/
 │   ├── __init__.py
-│   ├── model.py (337 lines)            ✅ BravaisLattice, HoppingModel
+│   ├── model.py (421 lines)            ✅ BravaisLattice, HoppingModel
 │   └── bzone.py (94 lines)             ✅ generate_kmesh, generate_k_path, k_frac_to_cart
 │
 ├── solvers/
@@ -174,8 +176,9 @@ src/condmatTensor/
 │
 ├── analysis/
 │   ├── __init__.py
-│   ├── dos.py (312 lines)              ✅ DOSCalculator, ProjectedDOS
-│   └── bandstr.py (237 lines)          ✅ BandStructure with plot() and plot_with_dos()
+│   ├── dos.py (601 lines)              ✅ DOSCalculator, ProjectedDOS with enhanced plotting
+│   ├── bandstr.py (626 lines)          ✅ BandStructure with enhanced plotting methods
+│   ├── plotting_style.py (87 lines)    ✅ Standardized plotting style constants
 │   ├── qgt.py                          ❌ NOT IMPLEMENTED
 │   ├── topology.py                     ❌ NOT IMPLEMENTED
 │   └── fermi.py                        ❌ NOT IMPLEMENTED
@@ -183,7 +186,7 @@ src/condmatTensor/
 ├── manybody/                           ✅ PARTIAL (preprocessing, magnetic)
 │   ├── __init__.py                     ✅ Exports implemented classes
 │   ├── preprocessing.py (496 lines)    ✅ Matsubara frequencies, BareGreensFunction, SelfEnergy, SpectralFunction
-│   ├── magnetic.py (789 lines)         ✅ LocalMagneticModel, KondoLatticeSolver, SpinFermionModel, pauli_matrices
+│   ├── magnetic.py (840 lines)         ✅ LocalMagneticModel, KondoLatticeSolver, SpinFermionModel, pauli_matrices
 │   ├── dmft.py                         ❌ NOT IMPLEMENTED (DMFTLoop)
 │   ├── cdmft.py                        ❌ NOT IMPLEMENTED (ClusterDMFTLoop)
 │   ├── ipt.py                          ❌ NOT IMPLEMENTED (IPTSolver)
@@ -196,8 +199,13 @@ src/condmatTensor/
 │
 ├── optimization/                       ✅ PARTIAL (bayesian, magnetic)
 │   ├── __init__.py                     ✅ Exports implemented classes
-│   ├── bayesian.py (573 lines)         ✅ BayesianOptimizer, MultiObjectiveOptimizer
-│   ├── magnetic.py (508 lines)         ✅ EffectiveArrayOptimizer for Kondo/spin-fermion model downfolding
+│   ├── bayesian/                       # Bayesian optimization with multiple backends
+│   │   ├── __init__.py (466 lines)     ✅ BayesianOptimizer, MultiObjectiveOptimizer
+│   │   ├── sober_backend.py (365 lines) ✅ SOBER backend implementation
+│   │   ├── botorch_backend.py (280 lines) ✅ BoTorch backend implementation
+│   │   ├── simple_backend.py (239 lines)  ✅ Simple backend (Thompson sampling)
+│   │   └── utils.py (128 lines)        ✅ Latin Hypercube Sampling, utilities
+│   ├── magnetic.py (631 lines)         ✅ EffectiveArrayOptimizer for Kondo/spin-fermion model downfolding
 │   └── ml_interface.py                 ❌ NOT IMPLEMENTED
 │
 ├── interface/                          ❌ ENTIRE MODULE NOT IMPLEMENTED
@@ -216,13 +224,15 @@ condmatTensor
 │
 ├── Layer 1: Foundation (0 internal deps)
 │   └── core/
-│       ├── base.py         ✅ (BaseTensor class - 138 lines)
+│       ├── base.py         ✅ (BaseTensor class - 285 lines)
+│       ├── types.py        ✅ (OrbitalMetadata dataclass - 145 lines)
+│       ├── device.py       ✅ (Device management - 87 lines)
 │       ├── math.py         ❌ NOT IMPLEMENTED
 │       └── gpu_utils.py    ❌ NOT IMPLEMENTED
 │
 ├── Layer 2: Data Structures (+ core)
 │   └── lattice/
-│       ├── model.py        ✅ (BravaisLattice, HoppingModel - 337 lines)
+│       ├── model.py        ✅ (BravaisLattice, HoppingModel - 421 lines)
 │       └── bzone.py        ✅ (generate_kmesh, generate_k_path, k_frac_to_cart - 94 lines)
 │
 ├── Layer 3: Solvers (+ core, lattice)
@@ -231,15 +241,16 @@ condmatTensor
 │
 ├── Layer 4: Many-Body (+ core, lattice)
 │   ├── preprocessing.py   ✅ (Matsubara frequencies, BareGreensFunction, SelfEnergy, SpectralFunction - 496 lines)
-│   ├── magnetic.py        ✅ (LocalMagneticModel, KondoLatticeSolver, SpinFermionModel, pauli_matrices - 789 lines)
+│   ├── magnetic.py        ✅ (LocalMagneticModel, KondoLatticeSolver, SpinFermionModel, pauli_matrices - 840 lines)
 │   ├── dmft.py            ❌ NOT IMPLEMENTED (DMFTLoop)
 │   ├── cdmft.py           ❌ NOT IMPLEMENTED (ClusterDMFTLoop)
 │   ├── ipt.py             ❌ NOT IMPLEMENTED (IPTSolver)
 │   └── ed.py              ❌ NOT IMPLEMENTED (ED)
 │
 ├── Layer 5: Analysis (+ core, lattice, solvers)
-│   ├── dos.py             ✅ (DOSCalculator, ProjectedDOS - 312 lines)
-│   ├── bandstr.py         ✅ (BandStructure with plot(), plot_with_dos() - 237 lines)
+│   ├── dos.py             ✅ (DOSCalculator, ProjectedDOS - 601 lines)
+│   ├── bandstr.py         ✅ (BandStructure with enhanced plotting - 626 lines)
+│   ├── plotting_style.py  ✅ (Plotting style constants - 87 lines)
 │   ├── fermi.py           ❌ NOT IMPLEMENTED
 │   ├── qgt.py             ❌ NOT IMPLEMENTED
 │   └── topology.py        ❌ NOT IMPLEMENTED
@@ -249,8 +260,13 @@ condmatTensor
 │   └── transport.py       ❌ NOT IMPLEMENTED
 │
 ├── Layer 7: Optimization (+ manybody)
-│   ├── bayesian.py        ✅ (BayesianOptimizer, MultiObjectiveOptimizer - 573 lines)
-│   ├── magnetic.py        ✅ (EffectiveArrayOptimizer for Kondo/spin-fermion downfolding - 508 lines)
+│   ├── bayesian/
+│   │   ├── __init__.py     ✅ (BayesianOptimizer, MultiObjectiveOptimizer - 466 lines)
+│   │   ├── sober_backend.py ✅ (SOBER backend - 365 lines)
+│   │   ├── botorch_backend.py ✅ (BoTorch backend - 280 lines)
+│   │   ├── simple_backend.py ✅ (Simple backend - 239 lines)
+│   │   └── utils.py        ✅ (Utilities - 128 lines)
+│   ├── magnetic.py        ✅ (EffectiveArrayOptimizer - 631 lines)
 │   └── ml_interface.py    ❌ NOT IMPLEMENTED
 │
 ├── Layer 8: Interface (+ core, lattice)
@@ -280,7 +296,7 @@ condmatTensor
 
 This section documents all currently implemented classes and their methods.
 
-### LEVEL 1: Core (`src/condmatTensor/core/base.py`)
+### LEVEL 1: Core (`src/condmatTensor/core/`)
 
 ```python
 class BaseTensor:
@@ -290,10 +306,11 @@ class BaseTensor:
         tensor: torch.Tensor           # Data
         labels: List[str]              # Semantic labels (e.g., ['k', 'orb_i', 'orb_j'])
         orbital_names: List[str] | None  # Physical orbital names
+        orbital_metadatas: List[OrbitalMetadata] | None  # Structured orbital metadata
         displacements: torch.Tensor | None  # For R→k Fourier transforms, shape (N_R, dim)
     """
 
-    def __init__(self, tensor, labels, orbital_names=None, displacements=None):
+    def __init__(self, tensor, labels, orbital_names=None, orbital_metadatas=None, displacements=None):
         """Initialize BaseTensor with validation."""
 
     def to_k_space(self, k) -> 'BaseTensor':
@@ -301,6 +318,22 @@ class BaseTensor:
 
     def to(self, device) -> 'BaseTensor':
         """Move tensor to device (CPU/GPU)."""
+
+    # Orbital metadata methods
+    def get_f_orbitals(self) -> List[int]:
+        """Get indices of f-orbitals."""
+
+    def get_orbitals_by_site(self, site: str) -> List[int]:
+        """Get indices of orbitals at a specific site."""
+
+    def get_spinful_orbitals(self) -> List[int]:
+        """Get indices of spinful orbitals."""
+
+    def is_spinful_system(self) -> bool:
+        """Check if system is spinful."""
+
+    def get_localized_orbitals(self) -> List[int]:
+        """Get indices of localized orbitals."""
 
     @property
     def shape(self) -> torch.Size:
@@ -313,6 +346,61 @@ class BaseTensor:
     @property
     def dtype(self) -> torch.dtype:
         """Return tensor dtype."""
+```
+
+```python
+class OrbitalMetadata:
+    """Structured metadata for a single orbital.
+
+    Attributes:
+        site: str | None              # Site identifier (e.g., 'Ce1', 'atom1')
+        orb: str | None               # Orbital type (e.g., 's', 'px', 'dxy', 'f')
+        spin: str | None              # Spin projection ('up', 'down', or None)
+        local: bool | None            # Localized (True) vs conductive (False)
+        U: float | None               # Hubbard U parameter
+        name: str | None              # Display name override
+    """
+
+    def to_string(self) -> str:
+        """Convert to string format (e.g., 'Ce1-f-spin_up-local-U7.0')."""
+
+    def is_f_orbital(self) -> bool:
+        """Check if this is an f-orbital."""
+
+    def is_spinful(self) -> bool:
+        """Check if this orbital has spin information."""
+
+    def is_localized(self) -> bool:
+        """Check if this orbital is localized."""
+
+    @classmethod
+    def from_string(cls, s: str) -> 'OrbitalMetadata':
+        """Parse orbital metadata from string."""
+
+    def as_dict(self) -> dict:
+        """Convert to dictionary for serialization."""
+
+    @classmethod
+    def from_dict(cls, d: dict) -> 'OrbitalMetadata':
+        """Create from dictionary."""
+```
+
+```python
+def get_device(device=None) -> torch.device:
+    """Get device with automatic CUDA detection and CPU fallback.
+
+    Args:
+        device: str or torch.device, or None for auto-detection
+
+    Returns:
+        torch.device: 'cuda' if available, else 'cpu'
+    """
+
+def is_cuda_available() -> bool:
+    """Check if CUDA is available on the system."""
+
+def get_default_device() -> torch.device:
+    """Returns default CPU device for the library."""
 ```
 
 ### LEVEL 2: Lattice (`src/condmatTensor/lattice/`)
@@ -482,26 +570,57 @@ class SpinFermionModel:
 
 ```python
 class BayesianOptimizer:
-    """Bayesian optimization for hyperparameter tuning.
+    """Bayesian optimization with multiple backends (SOBER, BoTorch, Simple).
 
     Attributes:
-        param_bounds: dict  # Parameter ranges
-        acquisition: str    # 'ei', 'ucb', 'poi'
+        bounds: List[Tuple[float, float]]  # Parameter bounds
+        backend: str  # 'sober', 'botorch', 'simple', or 'auto'
+        n_init: int  # Number of initial random points
+        n_iter: int  # Number of optimization iterations
     """
 
-    def optimize(self, objective_fn, n_iter=50, n_init=10):
-        """Run Bayesian optimization."""
+    def optimize(self, objective, maximize=False, verbose=True, device=None) -> Tuple:
+        """Run optimization. Returns (X_best, y_best)."""
+
+    def get_best(self) -> Tuple:
+        """Get best observation (X, y)."""
+
+    def reset(self) -> None:
+        """Reset optimizer state."""
 
 class MultiObjectiveOptimizer:
     """Multi-objective Bayesian optimization (Pareto front).
 
     Attributes:
-        param_bounds: dict
+        bounds: List[Tuple[float, float]]
         n_objectives: int
+        n_init: int
+        n_iter: int
     """
 
-    def optimize(self, objective_fns, n_iter=50):
-        """Find Pareto-optimal solutions."""
+    def optimize(self, objective, verbose=True, device=None) -> Tuple:
+        """Run multi-objective optimization."""
+
+    def _get_pareto_front(self) -> List:
+        """Extract Pareto-optimal solutions."""
+
+class SoberBackend:
+    """SOBER (Sequential Optimization using Ensemble of Regressors) backend.
+
+    Reference: https://github.com/ma921/SOBER
+    """
+
+class BotorchBackend:
+    """BoTorch Gaussian Process backend.
+
+    Reference: https://botorch.org/
+    """
+
+class SimpleBackend:
+    """Fallback backend using Thompson sampling or random search."""
+
+def latin_hypercube_sampling(bounds, n_samples, device, seed=None) -> torch.Tensor:
+    """Latin Hypercube Sampling for initial Bayesian optimization points."""
 
 class EffectiveArrayOptimizer:
     """Effective model downfolding for Kondo/spin-fermion models.
@@ -518,6 +637,25 @@ class EffectiveArrayOptimizer:
 ### LEVEL 5: Analysis (`src/condmatTensor/analysis/`)
 
 ```python
+# Plotting style constants for publication-quality plots
+DEFAULT_FIGURE_SIZES = {
+    'single': (6, 5),
+    'dual': (14, 5),
+    'triple': (18, 5),
+    '2x2': (12, 10),
+    'band_dos': (10, 5),
+    'comparison_2x3': (15, 10),
+    '2x1_vertical': (6, 10),
+    '3x1': (12, 10),
+    'wide': (16, 5),
+}
+DEFAULT_COLORS = {...}  # Color scheme (primary, reference, secondary, etc.)
+DEFAULT_FONTSIZES = {...}  # Font sizes for labels, titles, legend
+DEFAULT_STYLING = {...}  # Styling options (grid_alpha, band_linewidth, dpi)
+DEFAULT_COLORMAPS = {...}  # Colormaps (orbital_weight, spin, orbitals)
+LINE_STYLES = {...}  # Line styles (solid, dashed, dotted, dash_dot)
+MARKER_STYLES = {...}  # Marker styles (circle, square, triangle, etc.)
+
 class DOSCalculator:
     """Density of States calculator with Lorentzian broadening.
 
@@ -535,6 +673,15 @@ class DOSCalculator:
 
     def plot(self, ax=None, energy_range=None, ylabel, xlabel, title, fontsize, fill, **kwargs):
         """Plot stored DOS results."""
+
+    def plot_with_reference(self, reference_energies, labels=None, colors=None, ...):
+        """Plot DOS with vertical reference lines."""
+
+    def plot_comparison(self, other_dos_data, labels, colors=None, ...):
+        """Overlay multiple DOS curves."""
+
+    def plot_multi_panel(self, dos_list, titles, figsize=None, ...):
+        """Create multi-panel DOS comparison."""
 
 class ProjectedDOS(DOSCalculator):
     """Projected Density of States (extends DOSCalculator).
@@ -557,7 +704,7 @@ class ProjectedDOS(DOSCalculator):
         """Plot PDOS (stacked or overlaid)."""
 
 class BandStructure:
-    """Band structure calculator and plotting.
+    """Band structure calculator with enhanced plotting methods.
 
     Attributes:
         k_path: torch.Tensor | None
@@ -577,6 +724,18 @@ class BandStructure:
     def plot_with_dos(self, eigenvalues_mesh, omega, eta=0.02, energy_range, ylabel, dos_xlabel,
                      title, fontsize, figsize, dos_color, **kwargs):
         """Combined plot: bands + DOS (shared y-axis)."""
+
+    def plot_colored_by_weight(self, eigenvectors, orbital_indices, ax=None, cmap='viridis', ...):
+        """Plot bands colored by orbital weight."""
+
+    def add_reference_line(self, energy, label=None, color='red', linestyle='--', ...):
+        """Add horizontal reference line."""
+
+    def plot_comparison(self, other_eigenvalues, labels, colors=None, ...):
+        """Overlay multiple band structures."""
+
+    def plot_multi_panel(self, eigenvalues_list, titles, k_paths=None, ...):
+        """Create multi-panel comparison."""
 ```
 
 ---
