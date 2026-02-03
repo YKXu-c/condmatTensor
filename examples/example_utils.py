@@ -386,23 +386,47 @@ def setup_example_figure(
 
     Returns:
         tuple: (fig, ax) for single panel, (fig, axes) for multi-panel
+                For 2D layouts (e.g., 'comparison_2x3'), axes is a 2D array
+                For 1D layouts, axes is a 1D array
 
     Example:
         >>> fig, ax = setup_example_figure('single')
         >>> fig, axes = setup_example_figure('dual')
+        >>> fig, axes = setup_example_figure('comparison_2x3')  # 2x3 array
     """
     figsize = DEFAULT_FIGURE_SIZES.get(plot_type, DEFAULT_FIGURE_SIZES['single'])
     if 'figsize' in kwargs:
         figsize = kwargs['figsize']
 
-    n_panels = {'dual': 2, 'triple': 3, 'band_dos': 2}.get(plot_type, 1)
+    # Define panel layouts: (n_rows, n_cols) or n_panels for 1D layouts
+    layouts = {
+        'single': 1,
+        'dual': 2,
+        'triple': 3,
+        'band_dos': 2,
+        'comparison_2': 2,
+        'comparison_3': 3,
+    }
 
-    if n_panels == 1:
-        fig, ax = plt.subplots(figsize=figsize)
-        return fig, ax
-    else:
-        fig, axes = plt.subplots(1, n_panels, figsize=figsize)
+    # 2D layouts
+    layouts_2d = {
+        '2x2': (2, 2),
+        'comparison_2x3': (2, 3),
+    }
+
+    if plot_type in layouts_2d:
+        nrows, ncols = layouts_2d[plot_type]
+        fig, axes = plt.subplots(nrows, ncols, figsize=figsize)
+        # Return 2D axes array for 2D layouts
         return fig, axes
+    else:
+        n_panels = layouts.get(plot_type, 1)
+        if n_panels == 1:
+            fig, ax = plt.subplots(figsize=figsize)
+            return fig, ax
+        else:
+            fig, axes = plt.subplots(1, n_panels, figsize=figsize)
+            return fig, axes
 
 
 def save_example_figure(

@@ -269,7 +269,7 @@ def test_run_sober_optimization():
 
             print(f"  ✅ run_sober_optimization works")
             print(f"     Best point: {X_best.tolist()}")
-            print(f"     Best value: {y_best.item():.6f}")
+            print(f"     Best value: {y_best:.6f}")
 
             # Verify result is reasonable
             assert torch.all(X_best >= 0.0) and torch.all(X_best <= 1.0), \
@@ -359,7 +359,7 @@ def test_sober_integration_with_optimizer():
 
             print(f"  ✅ SOBER backend integration works")
             print(f"     Best point: {X_best.tolist()}")
-            print(f"     Best value: {y_best.item():.6f}")
+            print(f"     Best value: {y_best:.6f}")
 
             return True
 

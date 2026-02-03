@@ -227,23 +227,30 @@ def run_sober_optimization(
     using SOBER as the backend.
 
     Args:
-        objective: Function to optimize, takes X (n, d) and returns y (n,)
+        objective: Function to optimize, takes X (n, d) and returns y (n,).
+                   For minimization, the objective should already be negated
+                   by the caller (e.g., BayesianOptimizer.optimize()).
         bounds: List of (min, max) tuples for each parameter dimension
         n_init: Number of initial random samples
         n_iter: Number of optimization iterations
-        maximize: If True, maximize the objective. If False, minimize.
+        maximize: Ignored - SOBER always maximizes. The objective function
+                   should be pre-negated for minimization problems.
         seed: Random seed for reproducibility
         verbose: Print progress information
         device: Device for computation (SOBER auto-detects CUDA by default)
 
     Returns:
         (X_best, y_best) tuple where:
-        - X_best: Best parameters found, shape (n_dim,)
-        - y_best: Best objective value found
+        - X_best: Best parameters found (denormalized), shape (n_dim,)
+        - y_best: Best objective value found (as returned by objective function)
 
     Note:
         SOBER automatically detects and uses CUDA if available. The objective
         function should be able to handle inputs on any device (CPU or CUDA).
+
+        SOBER internally normalizes parameters to [0,1] for optimization.
+        This function denormalizes the returned parameters back to the
+        original bounds.
     """
     from condmatTensor.core import get_device
 
@@ -267,6 +274,10 @@ def run_sober_optimization(
         bounds_tensor[0, d] = min_val
         bounds_tensor[1, d] = max_val
 
+    # Track actual objective values (SOBER transforms Y internally)
+    X_actual = []
+    Y_actual = []
+
     # Create SOBER-compatible objective function
     def sober_objective(x, **kwargs):
         """SOBER objective function that wraps our objective."""
@@ -279,6 +290,10 @@ def run_sober_optimization(
             y = y.squeeze()
         if y.dim() == 0:
             y = y.unsqueeze(0)
+
+        # Store actual values for tracking (SOBER transforms Y internally)
+        X_actual.append(x.detach().cpu())
+        Y_actual.append(y.detach().cpu())
 
         # Pass through directly - negation is already handled by the wrapper
         # in BayesianOptimizer.optimize() to convert minimization to maximization
@@ -299,18 +314,11 @@ def run_sober_optimization(
         seed=seed,
     )
 
-    # Get initial samples and best
-    X_all = optimizer.X_all.cpu()  # Shape (n_init, n_dim)
-    Y_all = optimizer.Y_all.cpu()  # Shape (n_init,)
-
-    # Find best initial point
-    if maximize:
-        best_idx = torch.argmax(Y_all)
-    else:
-        best_idx = torch.argmin(Y_all)
-
-    X_best = X_all[best_idx]
-    y_best = Y_all[best_idx].item()
+    # Get initial best from actual tracked values
+    # Note: SOBER may call objective with batch of samples, so Y_actual may be nested
+    Y_init_all = torch.cat([y if y.dim() > 0 else y.unsqueeze(0) for y in Y_actual])
+    best_idx = torch.argmax(Y_init_all)
+    y_best = Y_init_all[best_idx].item()
 
     if verbose:
         print(f"  Initial best: {y_best:.6f}")
@@ -325,24 +333,26 @@ def run_sober_optimization(
         model_samples_per_iteration=1,
     )
 
-    # Get results as dict - this contains the actual observed values
-    results_dict = optimizer.results_to_dict()
+    # Get results from actual tracked values
+    # Note: SOBER normalizes parameters internally to [0,1]
+    # We need to denormalize them back to original bounds
+    X_all_normalized = optimizer.X_all  # (n_total, n_dim) - normalized to [0,1]
+    # Flatten Y_actual (may contain batched results)
+    Y_all_actual = torch.cat([y if y.dim() > 0 else y.unsqueeze(0) for y in Y_actual])  # (n_total,) - actual objective values
 
-    X_evals = np.array(results_dict['parameters evaluations'])  # (n_total, n_dim)
-    y_evals = np.array(results_dict['objective evaluations'])    # (n_total,) - negated losses
+    # Denormalize X values back to original bounds
+    n_dim = len(bounds)
+    X_evals = torch.zeros_like(X_all_normalized)
+    for d in range(n_dim):
+        min_val, max_val = bounds[d]
+        X_evals[:, d] = min_val + X_all_normalized[:, d] * (max_val - min_val)
 
-    # y_evals are negated loss values (maximization objective)
-    # Convert to actual loss values
-    losses = -y_evals
+    # SOBER always maximizes, so we always take argmax
+    # The objective passed to SOBER should already be negated for minimization
+    best_idx = torch.argmax(Y_all_actual)
 
-    # Find best point (minimum loss)
-    if maximize:
-        best_idx = np.argmax(y_evals)
-    else:
-        best_idx = np.argmin(losses)
-
-    X_best = torch.tensor(X_evals[best_idx], dtype=torch.float64)
-    y_best = losses[best_idx]
+    X_best = X_evals[best_idx]
+    y_best = Y_all_actual[best_idx].item()  # Return the actual value that SOBER optimized
 
     if verbose:
         print(f"\nOptimization complete!")
