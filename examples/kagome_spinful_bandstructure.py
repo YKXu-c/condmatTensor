@@ -18,124 +18,25 @@ of freedom. The Kagome lattice has 3 sites per unit cell, each with s-orbital
 - Dirac points at K point
 
 Reference:
-    - D. L. Bergman et al., Phys. Rev. B 76, 094417 (2007)
+    D. L. Bergman et al., Phys. Rev. B 76, 094417 (2007)
 """
 
-import sys
-from pathlib import Path
-
-# Add src to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+# example_utils handles path setup automatically
+from example_utils import (
+    get_example_device,
+    build_kagome_spinful_lattice,
+    build_kagome_spinful_model,
+    setup_example_figure,
+    save_example_figure,
+)
 
 import torch
 import matplotlib.pyplot as plt
 
-from condmatTensor.core import BaseTensor
-from condmatTensor.lattice import BravaisLattice, HoppingModel, generate_k_path
+from condmatTensor.lattice import generate_k_path
 from condmatTensor.solvers import diagonalize
 from condmatTensor.analysis import BandStructure, DOSCalculator
 from condmatTensor.manybody import LocalMagneticModel
-
-
-def build_kagome_spinful_lattice(t: float = -1.0) -> BravaisLattice:
-    """
-    Build Kagome lattice with spinful s-orbitals.
-
-    Returns:
-        BravaisLattice object with 3 sites, each with spin ↑ and ↓
-    """
-    import math
-
-    # Triangular lattice vectors
-    sqrt3 = math.sqrt(3)
-    a1 = torch.tensor([0.5, sqrt3 / 2])
-    a2 = torch.tensor([1.0, 0.0])
-    cell_vectors = torch.stack([a1, a2])
-
-    # 3 sites per unit cell (forming a triangle)
-    basis_positions = [
-        torch.tensor([0.0, 0.0]),
-        torch.tensor([0.5, 0.0]),
-        torch.tensor([0.25, sqrt3 / 4]),
-    ]
-
-    # Note: BravaisLattice doesn't take orbital_labels - set in TightBindingModel
-    # For spinful case: 3 sites × 2 spin (up/down) = 6 orbitals total
-    # num_orbitals is now a list: [2, 2, 2] for 3 sites, each with 2 spin orbitals
-    return BravaisLattice(
-        cell_vectors=cell_vectors,
-        basis_positions=basis_positions,
-        num_orbitals=[2, 2, 2],  # 3 sites, each with 2 spin orbitals
-    )
-
-
-def build_kagome_spinful_hamiltonian(lattice: BravaisLattice, t: float = -1.0) -> HoppingModel:
-    """
-    Build spinful tight-binding Hamiltonian for Kagome lattice.
-
-    Nearest-neighbor hopping (spin-conserving):
-        - A <-> B, B <-> C, C <-> A with displacement [0, 0]
-        - Plus periodic boundary connections
-
-    Args:
-        lattice: BravaisLattice object
-        t: Hopping parameter (default -1)
-
-    Returns:
-        HoppingModel with spinful orbitals (A_up, A_down, B_up, B_down, C_up, C_down)
-    """
-    # Spinful orbital labels: 3 sites × 2 spin = 6 orbitals
-    orbital_labels = [
-        "A_up", "A_down",
-        "B_up", "B_down",
-        "C_up", "C_down",
-    ]
-
-    tb_model = HoppingModel(lattice, orbital_labels=orbital_labels)
-
-    # Nearest-neighbor hopping (spin-conserving)
-    # Must match the spinless case in kagome_bandstructure.py
-
-    # A <-> B hopping
-    # Intra-cell: A(0,0) -> B(0,0)
-    tb_model.add_hopping("A_up", "B_up", [0, 0], t, add_hermitian=False)
-    tb_model.add_hopping("B_up", "A_up", [0, 0], t, add_hermitian=False)
-    tb_model.add_hopping("A_down", "B_down", [0, 0], t, add_hermitian=False)
-    tb_model.add_hopping("B_down", "A_down", [0, 0], t, add_hermitian=False)
-
-    # Inter-cell: A(-1,0) -> B(0,0) [equivalent to A(0,0) -> B(1,0)]
-    tb_model.add_hopping("A_up", "B_up", [-1, 0], t, add_hermitian=False)
-    tb_model.add_hopping("B_up", "A_up", [1, 0], t, add_hermitian=False)
-    tb_model.add_hopping("A_down", "B_down", [-1, 0], t, add_hermitian=False)
-    tb_model.add_hopping("B_down", "A_down", [1, 0], t, add_hermitian=False)
-
-    # A <-> C hopping
-    # Intra-cell: A(0,0) -> C(0,0)
-    tb_model.add_hopping("A_up", "C_up", [0, 0], t, add_hermitian=False)
-    tb_model.add_hopping("C_up", "A_up", [0, 0], t, add_hermitian=False)
-    tb_model.add_hopping("A_down", "C_down", [0, 0], t, add_hermitian=False)
-    tb_model.add_hopping("C_down", "A_down", [0, 0], t, add_hermitian=False)
-
-    # Inter-cell: A(0,-1) -> C(0,0) [equivalent to A(0,0) -> C(0,1)]
-    tb_model.add_hopping("A_up", "C_up", [0, -1], t, add_hermitian=False)
-    tb_model.add_hopping("C_up", "A_up", [0, 1], t, add_hermitian=False)
-    tb_model.add_hopping("A_down", "C_down", [0, -1], t, add_hermitian=False)
-    tb_model.add_hopping("C_down", "A_down", [0, 1], t, add_hermitian=False)
-
-    # B <-> C hopping
-    # Intra-cell: B(0,0) -> C(0,0)
-    tb_model.add_hopping("B_up", "C_up", [0, 0], t, add_hermitian=False)
-    tb_model.add_hopping("C_up", "B_up", [0, 0], t, add_hermitian=False)
-    tb_model.add_hopping("B_down", "C_down", [0, 0], t, add_hermitian=False)
-    tb_model.add_hopping("C_down", "B_down", [0, 0], t, add_hermitian=False)
-
-    # Inter-cell: B(1,-1) -> C(0,0) [equivalent to B(0,0) -> C(-1,1)]
-    tb_model.add_hopping("B_up", "C_up", [1, -1], t, add_hermitian=False)
-    tb_model.add_hopping("C_up", "B_up", [-1, 1], t, add_hermitian=False)
-    tb_model.add_hopping("B_down", "C_down", [1, -1], t, add_hermitian=False)
-    tb_model.add_hopping("C_down", "B_down", [-1, 1], t, add_hermitian=False)
-
-    return tb_model
 
 
 def main():
@@ -144,10 +45,15 @@ def main():
     print("Spinful Kagome Lattice Band Structure")
     print("=" * 70)
 
-    # Build lattice and Hamiltonian
+    # Get device
+    device = get_example_device("for diagonalization")
+
+    # Parameters
     t = -1.0
-    lattice = build_kagome_spinful_lattice(t)
-    tb_model = build_kagome_spinful_hamiltonian(lattice, t)
+
+    # Build lattice and Hamiltonian using utility functions
+    lattice = build_kagome_spinful_lattice()
+    tb_model = build_kagome_spinful_model(lattice, t)
 
     print(f"\nLattice: Total: {lattice.total_orbitals} orbitals ({lattice.num_sites} sites)")
     print(f"  Orbitals per site: {lattice.num_orbitals}")
@@ -176,8 +82,8 @@ def main():
     print(f"  Closest band mean energy: {eigenvalues.mean(dim=0)[flat_band_idx]:.4f}")
     print(f"  Band variance (flatness): {eigenvalues[:, flat_band_idx].var():.6e}")
 
-    # Plot band structure
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    # Plot band structure using utility function
+    fig, axes = setup_example_figure('dual')
 
     bs = BandStructure()
     bs.compute(eigenvalues, k_path, ticks)
@@ -198,9 +104,7 @@ def main():
                    label=f'Flat band at E={expected_flat_band_energy:.1f}')
     axes[1].legend()
 
-    plt.tight_layout()
-    plt.savefig("kagome_spinful_bandstructure.png", dpi=150)
-    print("\nPlot saved to kagome_spinful_bandstructure.png")
+    save_example_figure(fig, "kagome_spinful_bandstructure.png")
 
     # Verify spin degeneracy (bands should come in pairs)
     print("\nSpin degeneracy check:")
@@ -215,31 +119,12 @@ def main():
     print("Testing LocalMagneticModel: spinless -> spinful conversion")
     print("=" * 70)
 
-    # Build spinless version (num_orbitals=1 for spinless)
-    import math
-    sqrt3 = math.sqrt(3)
-    a1 = torch.tensor([0.5, sqrt3 / 2])
-    a2 = torch.tensor([1.0, 0.0])
-    cell_vectors_spinless = torch.stack([a1, a2])
-    basis_positions_spinless = [
-        torch.tensor([0.0, 0.0]),
-        torch.tensor([0.5, 0.0]),
-        torch.tensor([0.25, sqrt3 / 4]),
-    ]
-    lattice_spinless = BravaisLattice(
-        cell_vectors=cell_vectors_spinless,
-        basis_positions=basis_positions_spinless,
-        num_orbitals=[1, 1, 1],  # Spinless: 1 orbital per site
-    )
-    tb_spinless = HoppingModel(lattice_spinless, orbital_labels=["A", "B", "C"])
+    # Build spinless version using utility function
+    from example_utils import build_kagome_lattice, build_kagome_model
+    from condmatTensor.lattice import BravaisLattice
 
-    # Add hoppings (same as before but without spin)
-    tb_spinless.add_hopping("A", "B", [0, 0], t)
-    tb_spinless.add_hopping("B", "C", [0, 0], t)
-    tb_spinless.add_hopping("C", "A", [0, 0], t)
-    tb_spinless.add_hopping("A", "B", [0, -1], t)
-    tb_spinless.add_hopping("B", "C", [-1, 0], t)
-    tb_spinless.add_hopping("C", "A", [0, -1], t)
+    lattice_spinless = build_kagome_lattice(t)
+    tb_spinless = build_kagome_model(lattice_spinless, t)
 
     Hk_spinless = tb_spinless.build_Hk(k_path)
 

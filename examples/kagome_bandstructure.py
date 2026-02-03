@@ -15,136 +15,27 @@ Reference:
     - Flat band in Kagome lattice: D. L. Bergman et al., Phys. Rev. B 76, 094417 (2007)
 """
 
-import sys
-from pathlib import Path
-
-# Add src to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+# example_utils handles path setup automatically
+from example_utils import (
+    get_example_device,
+    build_kagome_lattice,
+    build_kagome_model,
+    setup_example_figure,
+    save_example_figure,
+)
 
 import torch
 import matplotlib.pyplot as plt
 
 from condmatTensor.core import BaseTensor
-from condmatTensor.lattice import BravaisLattice, HoppingModel, generate_k_path, generate_kmesh
+from condmatTensor.lattice import generate_k_path, generate_kmesh
 from condmatTensor.solvers import diagonalize
 from condmatTensor.analysis import BandStructure, DOSCalculator
 from condmatTensor.manybody import SpectralFunction
 
 
-def build_kagome_lattice(t: float = -1.0) -> BravaisLattice:
-    """
-    Build Kagome lattice.
-
-    The Kagome lattice has a triangular Bravais lattice with 3 sites per unit cell.
-    Sites are at fractional positions:
-        - r1 = (0, 0)
-        - r2 = (1/2, 0)
-        - r3 = (1/4, sqrt(3)/4)
-
-    Args:
-        t: Hopping parameter (default -1)
-
-    Returns:
-        BravaisLattice object
-    """
-    import math
-
-    # Triangular lattice vectors
-    sqrt3 = math.sqrt(3)
-    a1 = torch.tensor([0.5, sqrt3 / 2])
-    a2 = torch.tensor([1.0, 0.0])
-    cell_vectors = torch.stack([a1, a2])
-
-    # 3 sites per unit cell (forming a triangle)
-    basis_positions = [
-        torch.tensor([0.0, 0.0]),
-        torch.tensor([0.5, 0.0]),
-        torch.tensor([0.25, sqrt3 / 4]),
-    ]
-
-    return BravaisLattice(
-        cell_vectors=cell_vectors,
-        basis_positions=basis_positions,
-        num_orbitals=[1, 1, 1],  # 3 sites, each with 1 orbital
-    )
-
-
-def build_kagome_hamiltonian_real_space(lattice: BravaisLattice, t: float = -1.0) -> BaseTensor:
-    """
-    Build real-space tight-binding Hamiltonian for Kagome lattice.
-
-    Nearest-neighbor connections:
-        - Site 0 connects to Site 1 (same unit cell)
-        - Site 0 connects to Site 2 (same unit cell)
-        - Site 1 connects to Site 2 (same unit cell)
-        - Plus periodic boundary connections to neighboring cells
-
-    Args:
-        lattice: BravaisLattice object
-        t: Hopping parameter
-
-    Returns:
-        BaseTensor with real-space Hamiltonian, labels=['R', 'orb_i', 'orb_j']
-    """
-    import math
-
-    # Define hopping terms: (orb_i, orb_j, displacement)
-    # Displacement is in units of lattice vectors
-    hoppings = []
-
-    # Intra-cell hopping (R = 0)
-    hoppings.append((0, 1, torch.tensor([0, 0])))  # Site 0 -> 1
-    hoppings.append((1, 0, torch.tensor([0, 0])))  # Site 1 -> 0
-    hoppings.append((0, 2, torch.tensor([0, 0])))  # Site 0 -> 2
-    hoppings.append((2, 0, torch.tensor([0, 0])))  # Site 2 -> 0
-    hoppings.append((1, 2, torch.tensor([0, 0])))  # Site 1 -> 2
-    hoppings.append((2, 1, torch.tensor([0, 0])))  # Site 2 -> 1
-
-    # Inter-cell hopping (periodic boundary)
-    # Site 0 connects to Site 1 in cell (0, -1)
-    hoppings.append((0, 1, torch.tensor([0, -1])))
-    hoppings.append((1, 0, torch.tensor([0, 1])))
-
-    # Site 1 connects to Site 2 in cell (-1, 0)
-    hoppings.append((1, 2, torch.tensor([-1, 0])))
-    hoppings.append((2, 1, torch.tensor([1, 0])))
-
-    # Site 2 connects to Site 0 in cell (0, -1)
-    hoppings.append((2, 0, torch.tensor([0, -1])))
-    hoppings.append((0, 2, torch.tensor([0, 1])))
-
-    # Get unique displacements
-    displacements = torch.stack(list(set(tuple(hop[2].tolist()) for hop in hoppings)))
-    displacements = torch.tensor(displacements)
-
-    n_R = len(displacements)
-    n_orb = lattice.total_orbitals  # 3 for Kagome
-
-    # Build Hamiltonian tensor H[R_ij, orb_i, orb_j]
-    H_R = torch.zeros((n_R, n_orb, n_orb), dtype=torch.complex128)
-
-    for orb_i, orb_j, disp in hoppings:
-        # Find index of this displacement
-        for idx, d in enumerate(displacements):
-            if torch.allclose(d, disp):
-                R_idx = idx
-                break
-        H_R[R_idx, orb_i, orb_j] = t
-
-    # Convert to lattice vector coordinates
-    disp_cart = displacements @ lattice.cell_vectors
-
-    return BaseTensor(
-        tensor=H_R,
-        labels=["R", "orb_i", "orb_j"],
-        orbital_names=None,
-        displacements=disp_cart,
-    )
-
-
-def build_kagome_hamiltonian_k_space(lattice: BravaisLattice, k_path: torch.Tensor, t: float = -1.0) -> torch.Tensor:
-    """
-    Build k-space Hamiltonian for Kagome lattice (analytic).
+def build_kagome_hamiltonian_k_space(lattice, k_path: torch.Tensor, t: float = -1.0) -> torch.Tensor:
+    """Build k-space Hamiltonian for Kagome lattice (analytic).
 
     The Kagome lattice Hamiltonian has the form:
     H(k) = -t * [[0, 1 + e^{-ik·a1}, 1 + e^{-ik·a2}],
@@ -170,29 +61,21 @@ def build_kagome_hamiltonian_k_space(lattice: BravaisLattice, k_path: torch.Tens
     Hk = torch.zeros((N_k, 3, 3), dtype=torch.complex128)
 
     for i, k_frac in enumerate(k_path):
-        # Convert to Cartesian k-space coordinates
         k_cart = k_frac @ lattice.reciprocal_vectors().T
 
-        # Compute phase factors for nearest-neighbor hopping
-        # The basis vectors in the triangular lattice are not orthogonal
+        # Phase factors for nearest-neighbor hopping
         g1 = torch.exp(1j * torch.dot(k_cart, a1))
         g2 = torch.exp(1j * torch.dot(k_cart, a2))
 
         # Build Hamiltonian (nearest-neighbor only)
-        # H_ij = -t * Σ_<ij> exp(ik·δ_ij)
         H = torch.zeros((3, 3), dtype=torch.complex128)
 
-        # Site 0 (origin) connects to:
-        H[0, 1] = 1 + torch.conj(g1)  # Site 1 in same cell and cell (-1, 0)
-        H[0, 2] = 1 + torch.conj(g2)  # Site 2 in same cell and cell (0, -1)
-
-        # Site 1 connects to:
-        H[1, 0] = 1 + g1  # Hermitian conjugate
-        H[1, 2] = 1 + g1 * torch.conj(g2)  # Site 2 in same cell and cell (-1, 1)
-
-        # Site 2 connects to:
-        H[2, 0] = 1 + g2  # Hermitian conjugate
-        H[2, 1] = 1 + torch.conj(g1) * g2  # Hermitian conjugate
+        H[0, 1] = 1 + torch.conj(g1)
+        H[0, 2] = 1 + torch.conj(g2)
+        H[1, 0] = 1 + g1
+        H[1, 2] = 1 + g1 * torch.conj(g2)
+        H[2, 0] = 1 + g2
+        H[2, 1] = 1 + torch.conj(g1) * g2
 
         Hk[i] = -t * H
 
@@ -205,26 +88,18 @@ def main():
     print("Kagome Lattice Band Structure: Method Comparison")
     print("=" * 70)
 
-    # Device selection: Use GPU for complex operations (optional)
-    # Comment out the following line to force CPU usage
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"\nUsing device: {device}")
+    # Device selection
+    device = get_example_device("for diagonalization")
     if device.type == "cuda":
         print(f"  GPU: {torch.cuda.get_device_name(0)}")
-        print("  Note: This example is simple, but for larger lattices or")
-        print("        many k-points, GPU can provide significant speedup.")
 
     # Parameters
-    t = -1.0  # Hopping parameter (effective hopping = -t)
-    # Note: The analytic formula H = -t * M means:
-    #   - If we want effective hopping -1 (flat band at -2), we set t = 1
-    #   - If we want effective hopping +1 (flat band at +2), we set t = -1
-    # Here we use t = -1 for consistency with the Kagome lattice standard result
+    t = -1.0
     n_per_segment = 100
 
-    # Build lattice
+    # Build lattice using utility function
     print("\n1. Building Kagome lattice...")
-    lattice = build_kagome_lattice()
+    lattice = build_kagome_lattice(t)
     print(f"   Lattice: {lattice}")
     print(f"   Cell vectors:\n   {lattice.cell_vectors}")
 
@@ -256,38 +131,13 @@ def main():
 
     # ============================================================
     # METHOD 2: TightBindingModel with k-space build_Hk
-    #    Using SAME hopping definition as Method 1
     # ============================================================
     print("\n" + "=" * 70)
     print("METHOD 2: TightBindingModel.build_Hk (same hoppings as Method 1)")
     print("=" * 70)
 
     print("\n3b. Creating HoppingModel with Kagome hoppings...")
-    # Use the analytic hopping structure directly in k-space form
-    tb_model = HoppingModel(lattice, orbital_labels=["A", "B", "C"])
-
-    # Use add_hermitian=False to match analytic structure exactly
-    # IMPORTANT: Use hopping value = -t to match the analytic formula H = -t * M
-    hop_val = -t  # This is the actual hopping amplitude in the Hamiltonian
-
-    # A -> B: 1 + exp(-ik·a1)
-    tb_model.add_hopping("A", "B", [0, 0], hop_val, add_hermitian=False)      # intra: 1
-    tb_model.add_hopping("B", "A", [0, 0], hop_val, add_hermitian=False)      # intra: 1
-    tb_model.add_hopping("A", "B", [-1, 0], hop_val, add_hermitian=False)     # inter: exp(-ik·a1)
-    tb_model.add_hopping("B", "A", [1, 0], hop_val, add_hermitian=False)      # inter: exp(+ik·a1)
-
-    # A -> C: 1 + exp(-ik·a2)
-    tb_model.add_hopping("A", "C", [0, 0], hop_val, add_hermitian=False)      # intra: 1
-    tb_model.add_hopping("C", "A", [0, 0], hop_val, add_hermitian=False)      # intra: 1
-    tb_model.add_hopping("A", "C", [0, -1], hop_val, add_hermitian=False)     # inter: exp(-ik·a2)
-    tb_model.add_hopping("C", "A", [0, 1], hop_val, add_hermitian=False)      # inter: exp(+ik·a2)
-
-    # B -> C: 1 + exp(ik·(a1-a2))
-    tb_model.add_hopping("B", "C", [0, 0], hop_val, add_hermitian=False)      # intra: 1
-    tb_model.add_hopping("C", "B", [0, 0], hop_val, add_hermitian=False)      # intra: 1
-    tb_model.add_hopping("B", "C", [1, -1], hop_val, add_hermitian=False)     # inter: exp(ik·(a1-a2))
-    tb_model.add_hopping("C", "B", [-1, 1], hop_val, add_hermitian=False)     # inter: exp(-ik·(a1-a2))
-
+    tb_model = build_kagome_model(lattice, t)
     print(f"   Number of hopping terms: {len(tb_model.hoppings)}")
     print(f"   Orbital labels: {tb_model.orbital_labels}")
 
@@ -308,7 +158,6 @@ def main():
 
     # ============================================================
     # METHOD 3: Real-space H(R) + Fourier transform
-    #    Using SAME hopping model
     # ============================================================
     print("\n" + "=" * 70)
     print("METHOD 3: H(R) -> Fourier transform (same hoppings as Method 2)")
@@ -322,7 +171,6 @@ def main():
     print(f"   Number of R-vectors: {H_R.shape[0]}")
 
     print("\n4c. Fourier transform H(R) -> H(k)...")
-    # Convert k-path to Cartesian for Fourier transform
     k_cart = k_path @ lattice.reciprocal_vectors().T
     Hk_fourier = H_R.to_k_space(k_cart)
     print(f"   H(k): {Hk_fourier}")
@@ -365,32 +213,26 @@ def main():
     print("Creating comparison plot...")
     print("=" * 70)
 
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    fig, axes = setup_example_figure('comparison_3')
 
-    # Method 1: Direct k-space
     bs1 = BandStructure()
     bs1.compute(eigenvalues_direct, k_path, ticks)
     bs1.plot(ax=axes[0], ylabel="Energy ($|t|$)", title="Method 1: Direct k-space")
 
-    # Method 2: TightBindingModel
     bs2 = BandStructure()
     bs2.compute(eigenvalues_tb, k_path, ticks)
     bs2.plot(ax=axes[1], ylabel="Energy ($|t|$)", title="Method 2: HoppingModel.build_Hk")
 
-    # Method 3: Fourier from H(R)
     bs3 = BandStructure()
     bs3.compute(eigenvalues_fourier, k_path, ticks)
     bs3.plot(ax=axes[2], ylabel="Energy ($|t|$)", title="Method 3: H(R) → Fourier")
 
-    # Add flat band annotation
     for ax in axes:
         ax.text(0.05, 0.95, f"Flat band at -2",
                 transform=ax.transAxes, fontsize=9,
                 verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
 
-    plt.tight_layout()
-    plt.savefig("kagome_bandstructure_comparison.png", dpi=150)
-    print(f"   Saved: kagome_bandstructure_comparison.png")
+    save_example_figure(fig, "kagome_bandstructure_comparison.png")
 
     # ============================================================
     # DOS CALCULATION: Using k-mesh
@@ -419,22 +261,17 @@ def main():
     print(f"   DOS range: [{rho_vals.min():.4f}, {rho_vals.max():.4f}]")
 
     print("\n10a. Creating DOS plot...")
-    fig, ax = plt.subplots(figsize=(7, 5))
+    fig, ax = setup_example_figure('single')
     dos.plot(ax=ax, title="Kagome Lattice DOS (50x50 k-mesh)")
-
-    # Add flat band annotation
     ax.axvline(x=-2, color='red', linestyle='--', alpha=0.7, label='Flat band (E = -2)')
     ax.legend(fontsize=10)
-
-    plt.tight_layout()
-    plt.savefig("kagome_dos.png", dpi=150)
-    print(f"   Saved: kagome_dos.png")
+    save_example_figure(fig, "kagome_dos.png")
 
     # ============================================================
-    # NEW TEST: Bare Spectral Function A(ω) from Eigenvalues
+    # Bare Spectral Function A(ω) from Eigenvalues
     # ============================================================
     print("\n" + "=" * 70)
-    print("NEW TEST: Bare Spectral Function A(ω) (Non-Interacting)")
+    print("Bare Spectral Function A(ω) (Non-Interacting)")
     print("=" * 70)
 
     print("\n11. Computing bare spectral function A(ω) from eigenvalues...")
@@ -443,24 +280,19 @@ def main():
     print(f"   A(ω) shape: {A.shape}")
     print(f"   A(ω) range: [{A.min():.4f}, {A.max():.4f}]")
 
-    # Compute DOS from A(ω)
     dos_from_A = spec_func.compute_dos(A)
     print(f"   DOS from A(ω) shape: {dos_from_A.shape}")
     print(f"   DOS from A(ω) range: [{dos_from_A.min():.4f}, {dos_from_A.max():.4f}]")
 
-    # Compare with DOS from eigenvalues
     diff_dos = torch.max(torch.abs(dos_from_A - rho_vals)).item()
     print(f"\n   Max difference between DOS from A(ω) and DOS from eigenvalues: {diff_dos:.2e}")
 
     if diff_dos < 1e-10:
         print("   ✓ A(ω) matches DOS exactly for non-interacting case!")
-    else:
-        print(f"   Note: Small difference due to numerical precision")
 
     print("\n12. Creating A(ω) plot (orbital-resolved)...")
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    fig, axes = setup_example_figure('comparison_3')
 
-    # Plot 1: Orbital-resolved A(ω)
     ax1 = axes[0]
     colors = plt.cm.tab10(torch.linspace(0, 1, 3))
     for i in range(3):
@@ -472,7 +304,6 @@ def main():
     ax1.legend(fontsize=10)
     ax1.grid(True, alpha=0.3)
 
-    # Plot 2: Total A(ω) (which equals DOS)
     ax2 = axes[1]
     ax2.plot(omega.cpu().numpy(), dos_from_A.cpu().numpy(),
              color='black', linewidth=1.5)
@@ -483,7 +314,6 @@ def main():
     ax2.set_title("Total A(ω) (Sum over Orbitals)", fontsize=12)
     ax2.grid(True, alpha=0.3)
 
-    # Plot 3: Comparison A(ω) vs DOS from eigenvalues
     ax3 = axes[2]
     ax3.plot(omega.cpu().numpy(), dos_from_A.cpu().numpy(),
              label='A(ω) total', color='blue', linewidth=1.5)
@@ -496,23 +326,19 @@ def main():
     ax3.legend(fontsize=10)
     ax3.grid(True, alpha=0.3)
 
-    plt.tight_layout()
-    plt.savefig("kagome_spectral_function.png", dpi=150)
-    print(f"   Saved: kagome_spectral_function.png")
+    save_example_figure(fig, "kagome_spectral_function.png")
 
     # ============================================================
-    # NEW TEST: Band Structure + DOS Combined Plot
+    # Band Structure + DOS Combined Plot
     # ============================================================
     print("\n" + "=" * 70)
-    print("NEW TEST: Band Structure + DOS Combined Plot")
+    print("Band Structure + DOS Combined Plot")
     print("=" * 70)
 
     print("\n10b. Creating combined plot (bands + DOS with shared energy axis)...")
     bs_combined = BandStructure()
     bs_combined.compute(eigenvalues_tb, k_path, ticks)
 
-    # Use same k-mesh eigenvalues for DOS
-    # Note: plot_with_dos creates figure internally and returns (ax_bands, ax_dos)
     ax_bands, ax_dos = bs_combined.plot_with_dos(
         eigenvalues_mesh=eigenvalues_mesh,
         omega=omega,
@@ -520,17 +346,14 @@ def main():
         title="Kagome Lattice: Band Structure + DOS"
     )
 
-    # Add flat band annotation
     ax_bands.text(0.05, 0.95, f"Flat band at E = -2",
                   transform=ax_bands.transAxes, fontsize=9,
                   verticalalignment='top',
                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
-    ax_dos.axvline(x=0, color='red', linestyle='--', alpha=0.5)  # DOS reference at E=-2
+    ax_dos.axvline(x=0, color='red', linestyle='--', alpha=0.5)
 
-    # Get the figure from the axes and save
     fig = ax_bands.figure
-    fig.savefig("kagome_bandstructure_with_dos.png", dpi=150)
-    print(f"   Saved: kagome_bandstructure_with_dos.png")
+    save_example_figure(fig, "kagome_bandstructure_with_dos.png")
 
     print("\n" + "=" * 70)
     print("Done! All plots saved.")
