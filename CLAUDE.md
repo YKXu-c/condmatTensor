@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **Package Version**: 0.0.1
 - **License**: MIT
-- **Implementation Status**: ~45% complete (5 of 10 levels partially/fully implemented, ~4,500 lines)
+- **Implementation Status**: ~45% complete (5 of 10 levels partially/fully implemented, ~5,900 lines of Python code)
 - **Key Innovation**: One `BaseTensor` class for H, G, Σ with automatic R→k Fourier transforms
 
 ---
@@ -144,9 +144,23 @@ source env_condmatTensor/bin/activate
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
 pip install -r requirements.txt
 
+# For development, install package in editable mode
+pip install -e .
 ```
 
 **Note**: The virtual environment `env_condmatTensor` is used during development and is excluded from git.
+
+### Package Structure
+
+```
+src/condmatTensor/
+├── core/           # LEVEL 1: BaseTensor, device management
+├── lattice/        # LEVEL 2: BravaisLattice, HoppingModel
+├── solvers/        # LEVEL 3: diagonalize()
+├── manybody/       # LEVEL 4: Green's functions, self-energy
+├── analysis/       # LEVEL 5: DOS, band structure
+└── optimization/   # LEVEL 7: Bayesian optimization
+```
 
 ---
 
@@ -194,6 +208,41 @@ All energies are **dimensionless** in units of hopping parameter `|t|`. Default:
 - Kagome eigenvalues: -2|t| to +4|t|
 - Flat band at E = -2|t|
 
+### 5. Orbital Metadata System
+
+The `OrbitalMetadata` dataclass provides structured orbital metadata:
+
+```python
+from condmatTensor.core.types import OrbitalMetadata
+
+# Create orbital metadata
+metadata = OrbitalMetadata(
+    site=0,           # Site index in unit cell
+    orb=0,            # Orbital index at site
+    spin='up',        # Spin: 'up', 'down', or None
+    local=True,       # Whether orbital is localized (e.g., f-orbital)
+    U=5.0             # Hubbard U parameter (if applicable)
+)
+
+# Attach to BaseTensor
+HR = BaseTensor(tensor, labels=['R', 'orb_i', 'orb_j'], orbital_metadata=[...])
+```
+
+### 6. Magnetic Field and Peierls Substitution
+
+For external magnetic fields, use Peierls substitution:
+
+```python
+from condmatTensor.lattice import HoppingModel
+import numpy as np
+
+# Add hopping with magnetic field (Peierls phase)
+# Phase: phi = (e/ħ) ∫ A·dl
+model.add_hopping_with_B('A', 'B', displacement, t_value, B_field)
+```
+
+The phase factor modifies hopping: `t_ij → t_ij · exp(iφ_ij)` where `φ_ij = (e/ħc)∫_i^j A·dl`.
+
 ---
 
 ## Import Reference
@@ -230,6 +279,15 @@ from condmatTensor.analysis import (
     DOSCalculator,
     ProjectedDOS,
     BandStructure
+)
+
+# Plotting style constants (optional)
+from condmatTensor.analysis.plotting_style import (
+    DEFAULT_FIGURE_SIZES,
+    DEFAULT_COLORS,
+    DEFAULT_FONTSIZES,
+    DEFAULT_STYLING,
+    DEFAULT_COLORMAPS
 )
 
 # LEVEL 7: Optimization
@@ -312,16 +370,38 @@ The `examples/` directory demonstrates and validates core physics:
    - Expected: effective J_eff, S_eff parameters
    - Validates: Bayesian optimization, model reduction
 
+4. **`kagome_spinful_bandstructure.py`** - Spinful Kagome with Zeeman coupling
+   - Expected: spin-split bands, Zeeman effect
+   - Validates: spinor convention, magnetic field coupling
+
+5. **`kagome_f_spinful_bandstructure.py`** - Spinful Kagome-F
+   - Expected: 8 bands with spin-orbit coupling effects
+   - Validates: multi-orbital spinful systems
+
+6. **`kagome_spinful_with_b_field.py`** - External magnetic field
+   - Expected: Landau levels, magnetic field effects
+   - Validates: Peierls substitution, magnetic field implementation
+
+7. **`orbital_metadata_demo.py`** - Orbital metadata system
+   - Validates: OrbitalMetadata dataclass, orbital labels
+
+8. **`test_bayesian_backends.py`** - Bayesian optimization backends
+   - Validates: SOBER, BoTorch, and Simple backend comparison
+
+9. **`gpu_performance_benchmark.py`** - GPU acceleration testing
+   - Validates: CPU vs GPU performance for diagonalization
+
 ---
 
 ## Existing Documentation
 
 | File | Description |
 |------|-------------|
-| [`plans/architecture_plan.md`](plans/architecture_plan.md) | Comprehensive architecture reference (2,604 lines): module details, formalism, equations, workflows, dependencies |
-| [`plans/DEPENDENCY_ANALYSIS.md`](plans/DEPENDENCY_ANALYSIS.md) | Comparison with NumPy/TRIQS/WannierTools (847 lines) |
-| [`.cursorrules`](.cursorrules) | AI assistant rules for Cursor/Claude Code (751 lines): CPU/GPU split, device selection, development rules |
-| [`.github/copilot-instructions.md`](.github/copilot-instructions.md) | GitHub Copilot instructions (365 lines) |
+| [`plans/architecture_plan.md`](plans/architecture_plan.md) | Comprehensive architecture reference: module details, formalism, equations, workflows, dependencies |
+| [`plans/DEPENDENCY_ANALYSIS.md`](plans/DEPENDENCY_ANALYSIS.md) | Comparison with NumPy/TRIQS/WannierTools |
+| [`.cursorrules`](.cursorrules) | AI assistant rules for Cursor/Claude Code: CPU/GPU split, device selection, development rules |
+| [`developLog/allAPI.md`](developLog/allAPI.md) | Complete API documentation (update when API changes) |
+| [`developLog/developLog_YYYY-MM-DD.md`](developLog/) | Daily development logs |
 | [`requirements.txt`](requirements.txt) | Python dependencies |
 | [`.gitignore`](.gitignore) | Excludes: `CLAUDE.md`, `plans/`, `env_condmatTensor/`, `.claude/settings.json` |
 
@@ -340,6 +420,36 @@ The `examples/` directory demonstrates and validates core physics:
    - `developLog/allAPI.md` - Complete API documentation (update when API changes)
    - `developLog/developLog_YYYY-MM-DD.md` - Daily development logs
    - See `plans/architecture_plan.md` Rule 5 and `.cursorrules` Rule 8 for details
+
+---
+
+## Plotting Style System
+
+The library includes a standardized plotting style module for publication-quality figures:
+
+```python
+from condmatTensor.analysis.plotting_style import (
+    DEFAULT_FIGURE_SIZES,
+    DEFAULT_COLORS,
+    DEFAULT_FONTSIZES,
+    DEFAULT_STYLING,
+    DEFAULT_COLORMAPS,
+    LINE_STYLES,
+    MARKER_STYLES
+)
+
+# Available figure sizes
+# - 'single': (6, 5)
+# - 'dual': (14, 5)
+# - 'band_dos': (10, 5)
+# - 'comparison_2x3': (15, 10)
+
+# Color scheme
+# - 'primary': blue, 'reference': red
+# - 'fermi_level': green, 'flat_band': red
+```
+
+These constants are used automatically by `BandStructure.plot()` and `DOSCalculator.plot()` but can be overridden via `**kwargs`.
 
 ---
 
@@ -371,12 +481,16 @@ from condmatTensor.manybody.preprocessing import (
     BareGreensFunction,
     SelfEnergy
 )
+from condmatTensor.manybody.magnetic import KondoLatticeSolver
 
 omega = generate_matsubara_frequencies(beta=10.0, n_max=128)
 G0 = BareGreensFunction.from_hamiltonian(Hk, omega, mu=0.0)
 Sigma = SelfEnergy(omega, 0.0)
 # ... DMFT loop updates Sigma ...
 G = G0.apply_self_energy(Sigma)
+
+# For Kondo lattice systems
+solver = KondoLatticeSolver(lattice, J_coupling, S_moments)
 ```
 
 ### Bayesian Optimization

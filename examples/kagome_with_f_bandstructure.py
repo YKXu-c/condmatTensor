@@ -23,12 +23,16 @@ Reference:
     - Flat band physics in multi-orbital Kagome systems
 """
 
-import sys
-from pathlib import Path
-import importlib.util
-
-# Add src to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+# example_utils handles path setup automatically
+from example_utils import (
+    get_example_device,
+    build_kagome_lattice,
+    build_kagome_model,
+    build_kagome_f_lattice,
+    build_kagome_f_model,
+    setup_example_figure,
+    save_example_figure,
+)
 
 import torch
 import matplotlib.pyplot as plt
@@ -40,49 +44,6 @@ from condmatTensor.analysis import BandStructure, DOSCalculator
 from condmatTensor.manybody import SpectralFunction
 
 
-def build_kagome_f_lattice(t: float = -1.0, t_f: float = -0.5, epsilon_f: float = 0.0) -> BravaisLattice:
-    """
-    Build Kagome lattice with central f-orbital.
-
-    The Kagome-F lattice has a triangular Bravais lattice with 4 sites per unit cell.
-    Sites are at fractional positions:
-        - r1 = (0, 0)           - Kagome site A
-        - r2 = (1/2, 0)         - Kagome site B
-        - r3 = (1/4, sqrt(3)/4) - Kagome site C
-        - r4 = (1/4, sqrt(3)/12) - Central f-orbital site
-
-    Args:
-        t: Hopping parameter between Kagome sites (default -1)
-        t_f: Hopping parameter between Kagome and f-orbital (default -0.5)
-        epsilon_f: On-site energy for f-orbital (default 0)
-
-    Returns:
-        BravaisLattice object
-    """
-    import math
-
-    # Triangular lattice vectors
-    sqrt3 = math.sqrt(3)
-    a1 = torch.tensor([0.5, sqrt3 / 2])
-    a2 = torch.tensor([1.0, 0.0])
-    cell_vectors = torch.stack([a1, a2])
-
-    # 4 sites per unit cell (3 Kagome sites + 1 central f-orbital)
-    # The f-orbital sits at the center of the triangle
-    basis_positions = [
-        torch.tensor([0.0, 0.0]),          # Kagome site A (vertex of triangle)
-        torch.tensor([0.5, 0.0]),          # Kagome site B (vertex of triangle)
-        torch.tensor([0.25, sqrt3 / 4]),   # Kagome site C (vertex of triangle)
-        torch.tensor([0.25, sqrt3 / 12]),  # Central f-orbital (center of triangle)
-    ]
-
-    return BravaisLattice(
-        cell_vectors=cell_vectors,
-        basis_positions=basis_positions,
-        num_orbitals=[1, 1, 1, 1],  # 4 sites, each with 1 orbital
-    )
-
-
 def build_kagome_f_hamiltonian_k_space(
     lattice: BravaisLattice,
     k_path: torch.Tensor,
@@ -90,19 +51,15 @@ def build_kagome_f_hamiltonian_k_space(
     t_f: float = -0.5,
     epsilon_f: float = 0.0,
 ) -> torch.Tensor:
-    """
-    Build k-space Hamiltonian for Kagome-F lattice.
+    """Build k-space Hamiltonian for Kagome-F lattice.
 
     The Hamiltonian has the form:
     H(k) = [[H_Kagome(k),     H_Kf(k)   ],
             [H_Kf(k)^†,       epsilon_f ]]
 
-    where H_Kagome(k) is the 3x3 Kagome Hamiltonian and H_Kf(k) describes
-    the coupling between Kagome sites and the central f-orbital.
-
     Args:
         lattice: BravaisLattice object
-        k_path: K-points in fractional coordinates, shape (N_k, 2)
+        k_path: K-points in fractional coordinates
         t: Hopping parameter between Kagome sites
         t_f: Hopping parameter between Kagome sites and f-orbital
         epsilon_f: On-site energy for f-orbital
@@ -117,105 +74,35 @@ def build_kagome_f_hamiltonian_k_space(
     Hk = torch.zeros((N_k, 4, 4), dtype=torch.complex128)
 
     for i, k_frac in enumerate(k_path):
-        # Convert to Cartesian k-space coordinates
         k_cart = k_frac @ lattice.reciprocal_vectors().T
 
-        # Compute phase factors for nearest-neighbor hopping
+        # Phase factors for nearest-neighbor hopping
         g1 = torch.exp(1j * torch.dot(k_cart, a1))
         g2 = torch.exp(1j * torch.dot(k_cart, a2))
 
         # Build 4x4 Hamiltonian
         H = torch.zeros((4, 4), dtype=torch.complex128)
 
-        # === Kagome-Kagome hopping (same as pure Kagome) ===
-        # Site 0 (A) connects to:
+        # Kagome-Kagome hopping (same as pure Kagome)
         H[0, 1] = 1 + torch.conj(g1)
         H[0, 2] = 1 + torch.conj(g2)
-
-        # Site 1 (B) connects to:
         H[1, 0] = 1 + g1
         H[1, 2] = 1 + g1 * torch.conj(g2)
-
-        # Site 2 (C) connects to:
         H[2, 0] = 1 + g2
         H[2, 1] = 1 + torch.conj(g1) * g2
 
-        # === Kagome-f-orbital hopping ===
-        # Each Kagome site couples to the central f-orbital (site 3)
-        # The coupling includes contributions from neighboring cells
-        # Site A (0) -> f (3): 1 + g1/2 + g2/2 (to center of triangle)
-        # For simplicity, assume nearest-neighbor coupling only within unit cell
-        H[0, 3] = t_f / t  # Normalized to t units
+        # Kagome-f-orbital hopping
+        H[0, 3] = t_f / t
         H[1, 3] = t_f / t
         H[2, 3] = t_f / t
-
-        # Hermitian conjugate for f-orbital coupling
         H[3, 0] = torch.conj(H[0, 3])
         H[3, 1] = torch.conj(H[1, 3])
         H[3, 2] = torch.conj(H[2, 3])
-
-        # f-orbital on-site energy
         H[3, 3] = epsilon_f / t if t != 0 else 0
 
         Hk[i] = -t * H
 
     return Hk
-
-
-def build_kagome_f_hopping_model(
-    lattice: BravaisLattice,
-    t: float = -1.0,
-    t_f: float = -0.5,
-    epsilon_f: float = 0.0,
-) -> HoppingModel:
-    """
-    Build HoppingModel for Kagome-F lattice.
-
-    Args:
-        lattice: BravaisLattice object
-        t: Hopping parameter between Kagome sites
-        t_f: Hopping parameter between Kagome sites and f-orbital
-        epsilon_f: On-site energy for f-orbital
-
-    Returns:
-        HoppingModel object
-    """
-    # Create model with 4 orbitals (A, B, C for Kagome, f for central orbital)
-    tb_model = HoppingModel(lattice, orbital_labels=["A", "B", "C", "f"])
-
-    # Kagome-Kagome hopping (same as pure Kagome)
-    hop_val = -t  # Actual hopping amplitude
-
-    # A <-> B hopping
-    tb_model.add_hopping("A", "B", [0, 0], hop_val, add_hermitian=False)
-    tb_model.add_hopping("B", "A", [0, 0], hop_val, add_hermitian=False)
-    tb_model.add_hopping("A", "B", [-1, 0], hop_val, add_hermitian=False)
-    tb_model.add_hopping("B", "A", [1, 0], hop_val, add_hermitian=False)
-
-    # A <-> C hopping
-    tb_model.add_hopping("A", "C", [0, 0], hop_val, add_hermitian=False)
-    tb_model.add_hopping("C", "A", [0, 0], hop_val, add_hermitian=False)
-    tb_model.add_hopping("A", "C", [0, -1], hop_val, add_hermitian=False)
-    tb_model.add_hopping("C", "A", [0, 1], hop_val, add_hermitian=False)
-
-    # B <-> C hopping
-    tb_model.add_hopping("B", "C", [0, 0], hop_val, add_hermitian=False)
-    tb_model.add_hopping("C", "B", [0, 0], hop_val, add_hermitian=False)
-    tb_model.add_hopping("B", "C", [1, -1], hop_val, add_hermitian=False)
-    tb_model.add_hopping("C", "B", [-1, 1], hop_val, add_hermitian=False)
-
-    # Kagome-f-orbital hopping (within unit cell for simplicity)
-    tb_model.add_hopping("A", "f", [0, 0], t_f, add_hermitian=False)
-    tb_model.add_hopping("f", "A", [0, 0], t_f, add_hermitian=False)
-    tb_model.add_hopping("B", "f", [0, 0], t_f, add_hermitian=False)
-    tb_model.add_hopping("f", "B", [0, 0], t_f, add_hermitian=False)
-    tb_model.add_hopping("C", "f", [0, 0], t_f, add_hermitian=False)
-    tb_model.add_hopping("f", "C", [0, 0], t_f, add_hermitian=False)
-
-    # f-orbital on-site energy
-    tb_model.add_hopping("f", "f", [0, 0], epsilon_f, add_hermitian=False)
-
-    return tb_model
 
 
 def main():
@@ -225,14 +112,14 @@ def main():
     print("=" * 70)
 
     # Parameters
-    t = -1.0       # Kagome-Kagome hopping
-    t_f = -0.5     # Kagome-f hopping
-    epsilon_f = 0.0  # f-orbital on-site energy
+    t = -1.0
+    t_f = -0.5
+    epsilon_f = 0.0
     n_per_segment = 100
 
-    # Build lattice
+    # Build lattice using utility function
     print("\n1. Building Kagome-F lattice...")
-    lattice = build_kagome_f_lattice()
+    lattice = build_kagome_f_lattice(t)
     print(f"   Lattice: {lattice}")
     print(f"   Total orbitals per unit cell: {lattice.total_orbitals}")
     print(f"   Basis positions:")
@@ -274,7 +161,9 @@ def main():
     print("=" * 70)
 
     print("\n3b. Creating HoppingModel...")
-    tb_model = build_kagome_f_hopping_model(lattice, t=t, t_f=t_f, epsilon_f=epsilon_f)
+    tb_model = build_kagome_f_model(lattice, t=t, tf=t_f, fd_hybridization=t_f)
+    # Add f-orbital on-site energy
+    tb_model.add_hopping("F", "F", [0, 0], epsilon_f, add_hermitian=False)
     print(f"   Number of hopping terms: {len(tb_model.hoppings)}")
     print(f"   Orbital labels: {tb_model.orbital_labels}")
 
@@ -346,32 +235,26 @@ def main():
     print("Creating comparison plot...")
     print("=" * 70)
 
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    fig, axes = setup_example_figure('comparison_3')
 
-    # Method 1: Direct k-space
     bs1 = BandStructure()
     bs1.compute(eigenvalues_direct, k_path, ticks)
     bs1.plot(ax=axes[0], ylabel="Energy ($|t|$)", title="Method 1: Direct k-space")
 
-    # Method 2: HoppingModel
     bs2 = BandStructure()
     bs2.compute(eigenvalues_tb, k_path, ticks)
     bs2.plot(ax=axes[1], ylabel="Energy ($|t|$)", title="Method 2: HoppingModel.build_Hk")
 
-    # Method 3: Fourier from H(R)
     bs3 = BandStructure()
     bs3.compute(eigenvalues_fourier, k_path, ticks)
     bs3.plot(ax=axes[2], ylabel="Energy ($|t|$)", title="Method 3: H(R) → Fourier")
 
-    # Add parameter annotation
     for ax in axes:
         ax.text(0.05, 0.95, f"t={t}, t_f={t_f}\nε_f={epsilon_f}",
                 transform=ax.transAxes, fontsize=9,
                 verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
 
-    plt.tight_layout()
-    plt.savefig("kagome_with_f_bandstructure_comparison.png", dpi=150)
-    print(f"   Saved: kagome_with_f_bandstructure_comparison.png")
+    save_example_figure(fig, "kagome_with_f_bandstructure_comparison.png")
 
     # ============================================================
     # PARAMETER SCAN: Effect of f-orbital coupling
@@ -394,21 +277,17 @@ def main():
         bs.compute(eig_scan, k_path, ticks)
         bs.plot(ax=axes[idx], ylabel="Energy ($|t|$)", title=f"t_f = {t_f_val}")
 
-        # Print band info
         print(f"   Band ranges for t_f = {t_f_val}:")
         for i in range(4):
             emin = eig_scan[:, i].min().item()
             emax = eig_scan[:, i].max().item()
             print(f"      Band {i}: [{emin:.4f}, {emax:.4f}]")
 
-        # Check for flat band remnant
         bandwidth = (eig_scan[:, :].max(dim=0)[0] - eig_scan[:, :].min(dim=0)[0])
         flat_band_idx = bandwidth.argmin().item()
         print(f"      Flattest band: {flat_band_idx} (width = {bandwidth[flat_band_idx]:.4f})")
 
-    plt.tight_layout()
-    plt.savefig("kagome_with_f_tf_scan.png", dpi=150)
-    print(f"\n   Saved: kagome_with_f_tf_scan.png")
+    save_example_figure(fig, "kagome_with_f_tf_scan.png")
 
     # ============================================================
     # COMPARISON: Pure Kagome vs Kagome-F
@@ -417,37 +296,14 @@ def main():
     print("COMPARISON: Pure Kagome vs Kagome-F")
     print("=" * 70)
 
-    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+    fig, axes = setup_example_figure('dual')
 
-    # Pure Kagome (3 bands)
+    # Pure Kagome (3 bands) - using utility function
     print("\n   Computing pure Kagome bands...")
-    from condmatTensor.lattice import BravaisLattice as BravaisLatticeKagome
-    # Import the function from the other example file
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("kagome_bandstructure",
-                                                    Path(__file__).parent / "kagome_bandstructure.py")
-    kagome_module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(kagome_module)
-    build_kagome_hamiltonian_k_space = kagome_module.build_kagome_hamiltonian_k_space
-
-    # Build pure Kagome lattice (same cell vectors)
-    import math
-    sqrt3 = math.sqrt(3)
-    a1 = torch.tensor([0.5, sqrt3 / 2])
-    a2 = torch.tensor([1.0, 0.0])
-    kagome_basis = [
-        torch.tensor([0.0, 0.0]),
-        torch.tensor([0.5, 0.0]),
-        torch.tensor([0.25, sqrt3 / 4]),
-    ]
-    kagome_lattice = BravaisLattice(
-        cell_vectors=torch.stack([a1, a2]),
-        basis_positions=kagome_basis,
-        num_orbitals=[1, 1, 1],  # 3 sites, each with 1 orbital
-    )
-
-    Hk_kagome = build_kagome_hamiltonian_k_space(kagome_lattice, k_path, t=t)
-    eig_kagome, _ = diagonalize(Hk_kagome, hermitian=True)
+    kagome_lattice = build_kagome_lattice(t)
+    kagome_tb = build_kagome_model(kagome_lattice, t)
+    Hk_kagome = kagome_tb.build_Hk(k_path)
+    eig_kagome, _ = diagonalize(Hk_kagome.tensor, hermitian=True)
 
     bs_kagome = BandStructure()
     bs_kagome.compute(eig_kagome, k_path, ticks)
@@ -458,7 +314,6 @@ def main():
     bs_f.compute(eigenvalues_direct, k_path, ticks)
     bs_f.plot(ax=axes[1], ylabel="Energy ($|t|$)", title=f"Kagome-F (4 bands, t_f={t_f})")
 
-    # Add annotations
     axes[0].text(0.05, 0.95, "Flat band at -2",
                 transform=axes[0].transAxes, fontsize=9,
                 verticalalignment='top', bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.5))
@@ -467,9 +322,7 @@ def main():
                 transform=axes[1].transAxes, fontsize=9,
                 verticalalignment='top', bbox=dict(boxstyle='round', facecolor='lightcoral', alpha=0.5))
 
-    plt.tight_layout()
-    plt.savefig("kagome_vs_kagome_f.png", dpi=150)
-    print(f"   Saved: kagome_vs_kagome_f.png")
+    save_example_figure(fig, "kagome_vs_kagome_f.png")
 
     # ============================================================
     # DOS CALCULATION: Using k-mesh
@@ -498,24 +351,19 @@ def main():
     print(f"   DOS range: [{rho_vals.min():.4f}, {rho_vals.max():.4f}]")
 
     print("\n10. Creating DOS plot...")
-    fig, ax = plt.subplots(figsize=(7, 5))
+    fig, ax = setup_example_figure('single')
     dos.plot(ax=ax, title=f"Kagome-F Lattice DOS (t={t}, t_f={t_f})")
-
-    # Add parameter annotation
     ax.text(0.95, 0.95, f"t={t}\nt_f={t_f}\nε_f={epsilon_f}",
             transform=ax.transAxes, fontsize=10,
             verticalalignment='top', horizontalalignment='right',
             bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
-
-    plt.tight_layout()
-    plt.savefig("kagome_f_dos.png", dpi=150)
-    print(f"   Saved: kagome_f_dos.png")
+    save_example_figure(fig, "kagome_f_dos.png")
 
     # ============================================================
-    # NEW TEST: Bare Spectral Function A(ω) from Eigenvalues
+    # Bare Spectral Function A(ω) from Eigenvalues
     # ============================================================
     print("\n" + "=" * 70)
-    print("NEW TEST: Bare Spectral Function A(ω) (Non-Interacting)")
+    print("Bare Spectral Function A(ω) (Non-Interacting)")
     print("=" * 70)
 
     print("\n11. Computing bare spectral function A(ω) from eigenvalues...")
@@ -524,24 +372,19 @@ def main():
     print(f"   A(ω) shape: {A.shape}")
     print(f"   A(ω) range: [{A.min():.4f}, {A.max():.4f}]")
 
-    # Compute DOS from A(ω)
     dos_from_A = spec_func.compute_dos(A)
     print(f"   DOS from A(ω) shape: {dos_from_A.shape}")
     print(f"   DOS from A(ω) range: [{dos_from_A.min():.4f}, {dos_from_A.max():.4f}]")
 
-    # Compare with DOS from eigenvalues
     diff_dos = torch.max(torch.abs(dos_from_A - rho_vals)).item()
     print(f"\n   Max difference between DOS from A(ω) and DOS from eigenvalues: {diff_dos:.2e}")
 
     if diff_dos < 1e-10:
         print("   ✓ A(ω) matches DOS exactly for non-interacting case!")
-    else:
-        print(f"   Note: Small difference due to numerical precision")
 
     print("\n12. Creating A(ω) plot (orbital-resolved for Kagome-F)...")
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    fig, axes = setup_example_figure('comparison_3')
 
-    # Plot 1: Orbital-resolved A(ω)
     ax1 = axes[0]
     colors = plt.cm.tab10(torch.linspace(0, 1, 4))
     orbital_labels = ["A", "B", "C", "f"]
@@ -554,7 +397,6 @@ def main():
     ax1.legend(fontsize=10)
     ax1.grid(True, alpha=0.3)
 
-    # Plot 2: Total A(ω) (which equals DOS)
     ax2 = axes[1]
     ax2.plot(omega.cpu().numpy(), dos_from_A.cpu().numpy(),
              color='black', linewidth=1.5)
@@ -565,13 +407,11 @@ def main():
     ax2.set_title("Total A(ω) (Sum over Orbitals)", fontsize=12)
     ax2.grid(True, alpha=0.3)
 
-    # Plot 3: f-orbital contribution
     ax3 = axes[2]
     ax3.plot(omega.cpu().numpy(), A[:, 3].cpu().numpy(),
              label='f-orbital', color='red', linewidth=2)
     ax3.fill_between(omega.cpu().numpy(), 0, A[:, 3].cpu().numpy(),
                      alpha=0.3, color='red')
-    # Add Kagome site total for comparison
     kagome_A = torch.sum(A[:, :3], dim=1)
     ax3.plot(omega.cpu().numpy(), kagome_A.cpu().numpy(),
              label='Kagome sites (sum)', color='blue',
@@ -582,23 +422,19 @@ def main():
     ax3.legend(fontsize=10)
     ax3.grid(True, alpha=0.3)
 
-    plt.tight_layout()
-    plt.savefig("kagome_f_spectral_function.png", dpi=150)
-    print(f"   Saved: kagome_f_spectral_function.png")
+    save_example_figure(fig, "kagome_f_spectral_function.png")
 
     # ============================================================
-    # NEW TEST: Band Structure + DOS Combined Plot
+    # Band Structure + DOS Combined Plot
     # ============================================================
     print("\n" + "=" * 70)
-    print("NEW TEST: Band Structure + DOS Combined Plot")
+    print("Band Structure + DOS Combined Plot")
     print("=" * 70)
 
     print("\n11. Creating combined plot (bands + DOS with shared energy axis)...")
     bs_combined = BandStructure()
     bs_combined.compute(eigenvalues_tb, k_path, ticks)
 
-    # Use same k-mesh eigenvalues for DOS
-    # Note: plot_with_dos creates figure internally and returns (ax_bands, ax_dos)
     ax_bands, ax_dos = bs_combined.plot_with_dos(
         eigenvalues_mesh=eigenvalues_mesh,
         omega=omega,
@@ -606,7 +442,6 @@ def main():
         title=f"Kagome-F Lattice: Band Structure + DOS (t={t}, t_f={t_f})"
     )
 
-    # Add parameter annotation
     ax_bands.text(0.05, 0.95, f"t={t}\nt_f={t_f}\nε_f={epsilon_f}",
                   transform=ax_bands.transAxes, fontsize=9,
                   verticalalignment='top',
@@ -616,10 +451,8 @@ def main():
                 verticalalignment='top', horizontalalignment='right',
                 bbox=dict(boxstyle='round', facecolor='lightcoral', alpha=0.5))
 
-    # Get the figure from the axes and save
     fig = ax_bands.figure
-    fig.savefig("kagome_with_f_bandstructure_with_dos.png", dpi=150)
-    print(f"   Saved: kagome_with_f_bandstructure_with_dos.png")
+    save_example_figure(fig, "kagome_with_f_bandstructure_with_dos.png")
 
     print("\n" + "=" * 70)
     print("Done! All plots saved.")
