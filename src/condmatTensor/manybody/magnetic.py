@@ -29,6 +29,7 @@ References:
     - "Kondo s-d Model" - arXiv:2303.18235 (2023)
 
 LEVEL 4 of the 10-level architecture.
+Attention!!! The current module may have redundant issues compared to other parts. After confirming the dependency relationship, this module will be deleted.
 """
 
 from typing import Optional, Tuple, Union, List
