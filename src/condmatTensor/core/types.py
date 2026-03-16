@@ -55,7 +55,7 @@ class OrbitalMetadata:
 
     def is_f_orbital(self) -> bool:
         """Check if this is an f-orbital."""
-        return self.orb is not None and 'f' in self.orb.lower()
+        return self.orb is not None and self.orb.lower().startswith('f')
 
     def is_spinful(self) -> bool:
         """Check if this orbital has spin information."""
@@ -98,7 +98,7 @@ class OrbitalMetadata:
                 metadata.local = True
             elif part_lower == 'conductive':
                 metadata.local = False
-            elif part_lower.startswith('u'):
+            elif len(part) > 1 and part_lower[0] == 'u' and part_lower[1].isdigit():
                 try:
                     metadata.U = float(part[1:])
                 except ValueError:

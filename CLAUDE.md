@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **Package Version**: 0.0.1
 - **License**: MIT
-- **Implementation Status**: ~45% complete (5 of 10 levels partially/fully implemented, ~5,900 lines of Python code)
+- **Implementation Status**: ~50% complete (5 of 10 levels partially/fully implemented, ~7,500 lines of Python code)
 - **Key Innovation**: One `BaseTensor` class for H, G, Σ with automatic R→k Fourier transforms
 
 ---
@@ -101,7 +101,7 @@ pip install -r requirements.txt
 | **1** | Core | ✅ Complete | `BaseTensor`, `get_device()` |
 | **2** | Lattice | ✅ Complete | `BravaisLattice`, `HoppingModel`, `generate_kmesh`, `generate_k_path` |
 | **3** | Solvers | ⚠️ Partial | `diagonalize()` (ED, IPT not implemented) |
-| **4** | Many-Body | ⚠️ Partial | `BareGreensFunction`, `SelfEnergy`, `SpectralFunction`, `KondoLatticeSolver` (DMFT loops not implemented) |
+| **4** | Many-Body | ⚠️ Partial | `BareGreensFunction`, `SelfEnergy`, `SpectralFunction`, `KondoLatticeSolver`, `SingleSiteDMFTLoop`, `IPTSolver`, `PadeContinuation` |
 | **5** | Analysis | ⚠️ Partial | `DOSCalculator`, `ProjectedDOS`, `BandStructure` (topology, QGT not implemented) |
 | **6** | Transport | ❌ Not started | RGF, transport calculations |
 | **7** | Optimization | ⚠️ Partial | `BayesianOptimizer`, `EffectiveArrayOptimizer` (ML interface not implemented) |
@@ -133,6 +133,12 @@ python examples/kagome_f_effective_array.py
 
 # GPU performance benchmark
 python examples/gpu_performance_benchmark.py
+
+# DMFT for Kagome-F lattice (IPT solver, Pade continuation)
+python examples/kagome_f_dmft.py
+
+# Standalone Pade analytic continuation test
+python examples/pade_simple_test.py
 ```
 
 ### Virtual Environment
@@ -157,7 +163,8 @@ src/condmatTensor/
 ├── core/           # LEVEL 1: BaseTensor, device management
 ├── lattice/        # LEVEL 2: BravaisLattice, HoppingModel
 ├── solvers/        # LEVEL 3: diagonalize()
-├── manybody/       # LEVEL 4: Green's functions, self-energy
+├── manybody/       # LEVEL 4: Green's functions, self-energy, DMFT, impurity solvers
+│   └── impSolvers/ # IPTSolver, ImpuritySolverABC
 ├── analysis/       # LEVEL 5: DOS, band structure
 └── optimization/   # LEVEL 7: Bayesian optimization
 ```
@@ -272,6 +279,19 @@ from condmatTensor.manybody.preprocessing import (
 from condmatTensor.manybody.magnetic import (
     KondoLatticeSolver,
     SpinFermionModel
+)
+from condmatTensor.manybody.impSolvers import (
+    ImpuritySolverABC,
+    IPTSolver,
+)
+from condmatTensor.manybody.dmft import (
+    SingleSiteDMFTLoop,
+    LinearMixing,
+)
+from condmatTensor.manybody.analytic_continuation import (
+    PadeContinuation,
+    SimpleContinuation,
+    create_continuation_method,
 )
 
 # LEVEL 5: Analysis
@@ -391,6 +411,13 @@ The `examples/` directory demonstrates and validates core physics:
 9. **`gpu_performance_benchmark.py`** - GPU acceleration testing
    - Validates: CPU vs GPU performance for diagonalization
 
+10. **`kagome_f_dmft.py`** - DMFT for Kagome-F lattice
+    - Expected: orbital-selective correlations, f-orbital self-energy
+    - Validates: SingleSiteDMFTLoop, IPTSolver, Pade analytic continuation
+
+11. **`pade_simple_test.py`** - Standalone Pade analytic continuation test
+    - Validates: PadeContinuation accuracy against known analytic results
+
 ---
 
 ## Existing Documentation
@@ -491,6 +518,51 @@ These constants are used automatically by `BandStructure.plot()` and `DOSCalcula
 
 ---
 
+## DMFT Architecture (LEVEL 4)
+
+The DMFT implementation follows a modular design with pluggable impurity solvers:
+
+```
+SingleSiteDMFTLoop ──→ ImpuritySolverABC (ABC)
+                              ├── IPTSolver (implemented)
+                              ├── EDSolver (future)
+                              ├── NRGSolver (future)
+                              └── CTQMCSolver (future)
+```
+
+The 7-step DMFT algorithm:
+1. Start with Σ(iωₙ) = 0
+2. Compute G(k,iω) = [iω + μ - H(k) - Σ(iω)]⁻¹
+3. Extract G_loc(iω) = (1/N_k) Σ_k G(k,iω)
+4. Compute Weiss field: G₀⁻¹ = G_loc⁻¹ + Σ
+5. Solve impurity: Σ_new = solver.solve(G₀)
+6. Mix: Σ = (1-α)·Σ_old + α·Σ_new
+7. Check convergence: |ΔΣ|/|Σ| < tol
+
+Analytic continuation methods (G(iωₙ) → A(ω)):
+- `SimpleContinuation`: Direct substitution (fast, approximate)
+- `PadeContinuation`: Vidberg-Serene continued fraction (accurate)
+- `BetheLatticeContinuation`: Semi-elliptical DOS (testing)
+- `MaxEntContinuation`: Not yet implemented
+
+---
+
+## Known Bugs (as of 2026-03-16)
+
+All 4 source code bugs found in the 2026-03-16 audit have been fixed. See `plans/architecture_plan.md` "Known Bugs" section and `developLog/developLog_2026-03-16.md` for full details.
+
+**Fixed bugs:**
+1. `analytic_continuation.py`: `lattice.dimension` → `lattice.dim` (would crash at runtime)
+2. `impSolvers/ipt.py:_fft_to_iwn`: Removed extra `/ self.beta` from forward Matsubara transform — **re-validate DMFT convergence** by running `examples/kagome_f_dmft.py`
+3. `core/types.py:OrbitalMetadata.from_string()`: U-value parsing now requires digit after 'U' (e.g., 'U7.0' works, site name 'UCoGe' no longer misinterpreted)
+4. `core/types.py:OrbitalMetadata.is_f_orbital()`: Changed to `startswith('f')` for precise matching
+
+**Open documentation issues:**
+- `architecture_plan.md` LEVEL 3 diagram still lists `ipt.py`/`ed.py` in wrong location (they're in `manybody/impSolvers/`)
+- Section 2.4 of `DEPENDENCY_ANALYSIS.md` missing new LEVEL 4 API entries
+
+---
+
 ## Quick Reference: Common Workflows
 
 ### Band Structure Calculation
@@ -519,16 +591,22 @@ from condmatTensor.manybody.preprocessing import (
     BareGreensFunction,
     SelfEnergy
 )
-from condmatTensor.manybody.magnetic import KondoLatticeSolver
+from condmatTensor.manybody.dmft import SingleSiteDMFTLoop
+from condmatTensor.manybody.impSolvers import IPTSolver
 
+# Compute bare Green's function
+G0_calc = BareGreensFunction()
+G0 = G0_calc.compute(Hk, beta=10.0, mu=0.0, n_max=128)
+
+# Initialize self-energy to zero
+Sigma_calc = SelfEnergy()
 omega = generate_matsubara_frequencies(beta=10.0, n_max=128)
-G0 = BareGreensFunction.from_hamiltonian(Hk, omega, mu=0.0)
-Sigma = SelfEnergy(omega, 0.0)
-# ... DMFT loop updates Sigma ...
-G = G0.apply_self_energy(Sigma)
+Sigma = Sigma_calc.initialize_zero(omega, n_orb=Hk.shape[-1])
 
-# For Kondo lattice systems
-solver = KondoLatticeSolver(lattice, J_coupling, S_moments)
+# Run DMFT loop with IPT solver
+solver = IPTSolver(beta=10.0, n_max=128)
+dmft = SingleSiteDMFTLoop(Hk, omega, solver, mu=0.0, mixing=0.5)
+Sigma_converged = dmft.run(max_iter=100, tol=1e-6)
 ```
 
 ### Bayesian Optimization

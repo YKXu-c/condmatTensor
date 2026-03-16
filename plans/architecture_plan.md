@@ -2701,6 +2701,51 @@ class DOSCalculator:
 | BayesianOptimizer | `from condmatTensor.optimization import BayesianOptimizer` |
 | DOSCalculator | `from condmatTensor.analysis import DOSCalculator` |
 
+## Known Bugs and Discrepancies (Audit: 2026-03-16)
+
+This section documents bugs and discrepancies found during a comprehensive code audit comparing the actual source code against the documentation in this file and `DEPENDENCY_ANALYSIS.md`.
+
+### BUG 1: `OrbitalMetadata.is_f_orbital()` false positive risk — **FIXED 2026-03-16**
+- **File**: `src/condmatTensor/core/types.py:58`
+- **Bug**: `'f' in self.orb.lower()` matches any orbital name containing the letter 'f'.
+- **Fix applied**: Changed to `self.orb.lower().startswith('f')` for precise matching.
+
+### BUG 2: `OrbitalMetadata.from_string()` U-value parsing collision — **FIXED 2026-03-16**
+- **File**: `src/condmatTensor/core/types.py:101`
+- **Bug**: `part_lower.startswith('u')` would attempt to parse site names starting with 'U' (e.g., 'UCoGe') as Hubbard U values.
+- **Fix applied**: Changed condition to `len(part) > 1 and part_lower[0] == 'u' and part_lower[1].isdigit()` — requires a digit immediately after 'U'.
+
+### BUG 3: `BetheLatticeContinuation._estimate_coordination_number()` attribute error — **FIXED 2026-03-16**
+- **File**: `src/condmatTensor/manybody/analytic_continuation.py:461`
+- **Bug**: References `lattice.dimension` but `BravaisLattice` uses `lattice.dim`.
+- **Fix applied**: Changed `lattice.dimension` to `lattice.dim`.
+
+### BUG 4: IPT forward Matsubara transform has extra 1/β factor — **FIXED 2026-03-16**
+- **File**: `src/condmatTensor/manybody/impSolvers/ipt.py:_fft_to_iwn`
+- **Bug**: Code had `G_iwn = ... * dtau / self.beta`. The standard forward Matsubara transform `G(iωₙ) = ∫₀^β dτ e^{iωₙτ} G(τ)` has no 1/β prefactor. The 1/β belongs only in the inverse `G(τ) = (1/β) Σₙ ...`. The previous "BUG FIX" comment was incorrect — it added an extra 1/β that shouldn't be there.
+- **Fix applied**: Removed `/ self.beta` from the forward transform. Now `G_iwn = ... * dtau` only.
+- **Impact**: Σ(iωₙ) magnitudes are now β× larger. Re-validate DMFT convergence with `examples/kagome_f_dmft.py`.
+
+### BUG 5 (Documentation): Architecture plan LEVEL 3 lists wrong file locations
+- **This file, line ~157**: Lists `ipt.py` and `ed.py` under `LEVEL 3: Solvers` but these files don't exist in `solvers/`. The actual impurity solvers are in `manybody/impSolvers/ipt.py` and `manybody/impSolvers/base.py`.
+- **Status**: Not yet fixed in diagram (documentation only).
+
+### BUG 6 (Documentation): This file is outdated — missing new modules — **PARTIALLY FIXED**
+- Implemented modules now listed: `manybody/impSolvers/`, `manybody/dmft.py`, `manybody/analytic_continuation.py`
+- Module structure section (line ~22-124) still reflects old structure.
+
+### BUG 7 (Documentation): `.cursorrules` used wrong class name — **FIXED 2026-03-16**
+- **File**: `.cursorrules:174,179`
+- **Fix applied**: `TightBindingModel` → `HoppingModel`.
+
+### BUG 8 (Documentation): CLAUDE.md API errors — **FIXED 2026-03-16**
+- Fixed `BareGreensFunction.from_hamiltonian()` → `BareGreensFunction.compute()`
+- Fixed `SelfEnergy(omega, 0.0)` → `SelfEnergy()` + `.initialize_zero()`
+- Removed nonexistent `initialize_atomic`, `from_greens_function`, `apply_self_energy`
+- Added correct DMFT workflow example
+
+---
+
 ## References
 
 [1] G. Kotliar and D. Vollhardt, "Dynamical mean-field theory of strongly correlated fermion systems and the limit of infinite dimensions", *Rev. Mod. Phys.* **76**, 903 (2004).

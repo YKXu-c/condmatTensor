@@ -991,7 +991,90 @@ Based on the reference libraries analysis:
 
 ---
 
-## 8. Conclusion
+## 8. Known Bugs and Discrepancies (Audit: 2026-03-16)
+
+This section documents bugs and discrepancies found during a comprehensive code audit. For a more detailed listing, see the corresponding section in `architecture_plan.md`.
+
+### 8.1 Source Code Bugs
+
+| # | File | Bug | Severity | Status |
+|---|------|-----|----------|--------|
+| 1 | `core/types.py:58` | `is_f_orbital()`: `'f' in self.orb.lower()` may false-positive on custom orbital names containing 'f' | Low | **FIXED 2026-03-16** |
+| 2 | `core/types.py:101` | `from_string()`: `part_lower.startswith('u')` collides with site names starting with 'U' (e.g., 'UCoGe') | Medium | **FIXED 2026-03-16** |
+| 3 | `manybody/analytic_continuation.py:461` | `BetheLatticeContinuation._estimate_coordination_number()` references `lattice.dimension` instead of `lattice.dim` — will raise AttributeError | **High** | **FIXED 2026-03-16** |
+| 4 | `manybody/impSolvers/ipt.py:_fft_to_iwn` | IPT forward Matsubara transform had extra `/ self.beta`. Standard: `G(iωₙ) = ∫₀^β dτ e^{iωₙτ} G(τ)` — no 1/β prefactor. Fix: removed spurious division. **Re-validate DMFT convergence.** | Medium | **FIXED 2026-03-16** |
+
+### 8.2 Documentation vs Code Discrepancies
+
+| # | Document | Discrepancy | Status |
+|---|----------|-------------|--------|
+| 1 | This file, Section 2.1 | Missing implemented modules: `dmft.py`, `impSolvers/`, `analytic_continuation.py` | Open |
+| 2 | This file, Section 2.4 | API reference incomplete — missing `SingleSiteDMFTLoop`, `IPTSolver`, `ImpuritySolverABC`, `PadeContinuation`, etc. | Open |
+| 3 | `architecture_plan.md` | LEVEL 3 incorrectly lists `ipt.py` and `ed.py` — they're in `manybody/impSolvers/` | Open |
+| 4 | `.cursorrules:174,179` | Uses `TightBindingModel` which was renamed to `HoppingModel` | **FIXED 2026-03-16** |
+| 5 | `CLAUDE.md` | Documents `BareGreensFunction.from_hamiltonian()` — actual is `.compute()` | **FIXED 2026-03-16** |
+| 6 | `CLAUDE.md` | Documents `SelfEnergy.initialize_atomic()`, `.from_greens_function()` — don't exist | **FIXED 2026-03-16** |
+| 7 | `CLAUDE.md` | Documents `G0.apply_self_energy(Sigma)` — doesn't exist | **FIXED 2026-03-16** |
+| 8 | Multiple docs | Line counts are stale (e.g., preprocessing.py: documented 496, actual 785) | Open |
+
+### 8.3 Updated File Structure (as of 2026-03-16)
+
+```
+src/condmatTensor/
+├── core/
+│   ├── __init__.py
+│   ├── base.py (~300 lines)     ✅ BaseTensor
+│   ├── types.py (~146 lines)    ✅ OrbitalMetadata
+│   └── device.py (~87 lines)    ✅ get_device, is_cuda_available
+│
+├── lattice/
+│   ├── __init__.py
+│   ├── model.py (~422 lines)    ✅ BravaisLattice, HoppingModel
+│   └── bzone.py (~94 lines)     ✅ generate_kmesh, generate_k_path
+│
+├── solvers/
+│   ├── __init__.py
+│   └── diag.py (~37 lines)      ✅ diagonalize()
+│
+├── manybody/
+│   ├── __init__.py              ✅ Full exports
+│   ├── preprocessing.py (~785 lines)  ✅ Matsubara, BareGreensFunction, SelfEnergy, SpectralFunction
+│   ├── magnetic.py (~840 lines) ✅ LocalMagneticModel, KondoLatticeSolver, SpinFermionModel
+│   ├── analytic_continuation.py (~542 lines) ✅ Pade, Simple, Bethe, MaxEnt(stub)
+│   ├── dmft.py (~416 lines)     ✅ SingleSiteDMFTLoop, MixingMethod, LinearMixing
+│   └── impSolvers/
+│       ├── __init__.py          ✅ ImpuritySolverABC, IPTSolver
+│       ├── base.py (~95 lines)  ✅ ImpuritySolverABC (ABC)
+│       └── ipt.py (~461 lines)  ✅ IPTSolver
+│
+├── analysis/
+│   ├── __init__.py
+│   ├── dos.py (~601 lines)      ✅ DOSCalculator, ProjectedDOS
+│   ├── bandstr.py (~626 lines)  ✅ BandStructure
+│   └── plotting_style.py (~87 lines)  ✅ Style constants
+│
+└── optimization/
+    ├── __init__.py
+    ├── bayesian/
+    │   ├── __init__.py (~466 lines)  ✅ BayesianOptimizer, MultiObjectiveOptimizer
+    │   ├── sober_backend.py (~365 lines)  ✅ SOBER backend
+    │   ├── botorch_backend.py (~280 lines) ✅ BoTorch backend
+    │   ├── simple_backend.py (~239 lines)  ✅ Simple backend
+    │   └── utils.py (~128 lines)    ✅ Latin Hypercube Sampling
+    └── magnetic.py (~631 lines) ✅ EffectiveArrayOptimizer
+```
+
+### 8.4 Proposed Fixes (Priority Order)
+
+1. **HIGH**: Fix `lattice.dimension` → `lattice.dim` in `analytic_continuation.py:461`
+2. **MEDIUM**: Verify IPT FFT normalization with round-trip test
+3. **MEDIUM**: Fix `OrbitalMetadata.from_string()` U-parsing to require digit after 'U'
+4. **LOW**: Tighten `is_f_orbital()` matching
+5. **DOC**: Update all stale documentation to match current implementation
+
+---
+
+## 9. Conclusion
 
 The condmatTensor plan follows a **layered architecture** similar to NumPy, with clear separation between foundation (core) and specialized modules (manybody, transport, optimization). Key differences from reference libraries:
 

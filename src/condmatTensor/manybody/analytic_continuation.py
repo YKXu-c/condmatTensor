@@ -457,7 +457,7 @@ class BetheLatticeContinuation(AnalyticContinuationMethod):
             Estimated coordination number
         """
         # Simple heuristic based on common lattices
-        dim = lattice.dimension
+        dim = lattice.dim
         if dim == 2:
             return 4.0  # Square lattice
         elif dim == 3:

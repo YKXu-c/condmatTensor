@@ -312,9 +312,13 @@ class IPTSolver(ImpuritySolverABC):
     def _fft_to_iwn(self, G_tau: torch.Tensor) -> torch.Tensor:
         """FFT from imaginary time to Matsubara frequencies.
 
-        G(iωₙ) = (1/β) ∫₀^β dτ e^(iωₙτ) G(τ)
+        Standard fermionic Matsubara forward transform:
+            G(iωₙ) = ∫₀^β dτ e^(iωₙτ) G(τ)
 
-        Using proper fermionic Matsubara frequency transform.
+        Note: There is NO 1/β prefactor in the forward transform.
+        The 1/β prefactor belongs only to the inverse transform:
+            G(τ) = (1/β) Σₙ e^(-iωₙτ) G(iωₙ)
+
         For fermions: ωₙ = π(2n+1)/β
 
         Args:
@@ -339,9 +343,7 @@ class IPTSolver(ImpuritySolverABC):
         phase_matrix = torch.exp(1j * torch.outer(wn, tau))
 
         # G(iωₙ) = ∫₀^β dτ e^(iωₙτ) G(τ) ≈ Σ_τ e^(iωₙτ) G(τ) Δτ
-        # BUG FIX: Added missing 1/β normalization factor
-        # For β=10, this was causing Σ to be 10× too large before applying U² factor
-        G_iwn = torch.matmul(phase_matrix, G_tau) * dtau / self.beta
+        G_iwn = torch.matmul(phase_matrix, G_tau) * dtau
 
         return G_iwn
 

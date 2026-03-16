@@ -171,12 +171,12 @@ from condmatTensor.optimization import (
 
 ### Band Structure Calculation
 ```python
-from condmatTensor.lattice import BravaisLattice, TightBindingModel, generate_k_path
+from condmatTensor.lattice import BravaisLattice, HoppingModel, generate_k_path
 from condmatTensor.solvers import diagonalize
 from condmatTensor.analysis import BandStructure
 
 lattice = BravaisLattice(cell_vectors, basis_positions, num_orbitals)
-model = TightBindingModel(lattice, orbital_labels=['A', 'B', 'C'])
+model = HoppingModel(lattice, orbital_labels=['A', 'B', 'C'])
 model.add_hopping('A', 'B', [0, 0], 1.0)
 
 k_path, labels = generate_k_path(lattice, ['G', 'K', 'M', 'G'], n_k=100)
